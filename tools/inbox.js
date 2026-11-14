@@ -7,6 +7,7 @@
 //   node tools/inbox.js done <id> "답장"             «끝남» + 답장(앱 카드에 말풍선으로 보임)
 //   node tools/inbox.js reply <id> "답장"            답장만 달고 «읽음»으로(아직 할 일이 남았을 때)
 // 쓰기(seen/done/reply)는 상태·답장 칸만 바꾼다. 효니가 쓴 글(t)은 건드리지 않는다.
+process.noDeprecation = true; // Windows에서 npx.cmd를 shell로 부를 때 나오는 경고 숨김(인자는 id 검사·따옴표로 감쌈)
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
