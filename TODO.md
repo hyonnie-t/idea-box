@@ -14,4 +14,4 @@
 - [x] 4. Claude 쪽 도구 tools/inbox.js(새 쪽지 보기·읽음·끝남+답장)
 - [x] 5. 데모(?demo=1)·serve.js·아이콘
 - [x] 6. 검토자·화면 확인(폰·태블릿 768/1180·PC·다크)
-- [ ] 7. GitHub 레포·Pages 배포·레포 주소록·CLAUDE.md
+- [x] 7. GitHub 레포·Pages 배포·레포 주소록·CLAUDE.md
