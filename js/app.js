@@ -92,7 +92,7 @@ async function open(s) {
   $('#content').hidden = false;
   $('#signout').hidden = isDemo;
   try {
-    await store.watch((v) => { ideas = v; if (!isDemo && !store.offline) status(''); render(); flush(); }, () => status('쪽지를 불러오지 못했어요. 새로고침해 주세요.'));
+    await store.watch((v) => { ideas = buryDeleted(v); if (!isDemo && !store.offline) status(''); render(); flush(); }, () => status('쪽지를 불러오지 못했어요. 새로고침해 주세요.'));
   } catch (e) { status('쪽지를 불러오지 못했어요. 인터넷을 확인해 주세요.'); }
   render();
   flush();
@@ -130,10 +130,13 @@ function bind() {
   for (const d of [$('#ask'), $('#edit')]) {
     // 바깥(어두운 곳)을 누르면 닫기
     // 창 자체에는 여백을 두지 않고(안쪽 form이 여백을 가짐) 바깥 좌표인지까지 본다 — 창 가장자리를 눌러 고치던 글이 날아가지 않게
+    // 누른 곳과 뗀 곳이 모두 창 밖일 때만 닫는다(글을 고르다 바깥에서 손을 떼도 안 닫히게)
+    const outside = (e) => { const r = d.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
+    let downOut = false;
+    d.addEventListener('pointerdown', (e) => { downOut = e.target === d && outside(e); });
     d.addEventListener('click', (e) => {
-      if (e.target !== d) return;
-      const r = d.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close('no');
+      if (e.target === d && downOut && outside(e)) d.close('no');
+      downOut = false;
     });
   }
   window.addEventListener('online', flush);
@@ -177,7 +180,9 @@ function takeShare() {
     // 쓰던 글이 있으면 덮지 않고 아래에 붙인다
     const before = (ls.get(DRAFT, null)?.t || '').trim();
     restoreDraft();
-    $('#t').value = (before ? before + '\n\n' : '') + uniq.join('\n');
+    const add = uniq.join('\n');
+    // 같은 공유가 두 번 들어와(새로고침 등) 똑같은 글이 겹쳐 붙지 않게
+    $('#t').value = before.includes(add) ? before : (before ? before + '\n\n' : '') + add;
     grow($('#t'));
     saveDraft();
   }
@@ -211,21 +216,35 @@ async function flush() {
   if (!store || flushing || store.offline) return;
   flushing = true;
   const tried = new Set();
-  try {
-    // 올리는 사이 새로 넣은 쪽지도 같은 차례에 올린다
-    for (;;) {
-      const box = ls.get(OUTBOX, {});
-      const id = Object.keys(box).find((k) => !tried.has(k));
-      if (!id) break;
-      tried.add(id);
-      await withTimeout(store.create(id, box[id]), 8000);
-      dropOutbox(id);
-    }
-  } catch (e) {
-    status('인터넷이 끊겨 쪽지를 이 기기에 모아 뒀어요. 연결되면 올라가요.');
-  } finally { flushing = false; render(); }
+  let failed = 0;
+  // 올리는 사이 새로 넣은 쪽지도 같은 차례에 올리고, 한 장이 실패해도 나머지는 계속 올린다
+  for (;;) {
+    const box = ls.get(OUTBOX, {});
+    const id = Object.keys(box).find((k) => !tried.has(k));
+    if (!id) break;
+    tried.add(id);
+    try { await withTimeout(store.create(id, box[id]), 8000); dropOutbox(id); } catch (e) { failed++; }
+  }
+  if (failed) status('인터넷이 끊겨 쪽지를 이 기기에 모아 뒀어요. 연결되면 올라가요.');
+  flushing = false;
+  render();
 }
 function dropOutbox(id) { const box = ls.get(OUTBOX, {}); if (box[id]) { delete box[id]; ls.set(OUTBOX, box); } }
+
+// 지운 쪽지 표시(7일 보관). 올라가는 중에 지운 쪽지가 늦게 서버에 생겨도 다시 지우고 화면에 안 보이게 한다.
+const DELETED = 'ideabox-deleted';
+function markDeleted(id) {
+  const now = Date.now();
+  const d = Object.fromEntries(Object.entries(ls.get(DELETED, {})).filter(([, t]) => now - t < 7 * 86400e3));
+  d[id] = now;
+  ls.set(DELETED, d);
+}
+function buryDeleted(v) {
+  const d = ls.get(DELETED, {});
+  const out = { ...v };
+  for (const id of Object.keys(out)) if (d[id]) { delete out[id]; store?.remove(id).catch(() => {}); }
+  return out;
+}
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
 
 // ---------- 목록 ----------
@@ -275,6 +294,7 @@ async function onListClick(e) {
     if (!(await ask('이 쪽지를 지울까요? 되돌릴 수 없어요.'))) return;
     // 우편함에서 먼저 빼야 다음 올리기가 지운 쪽지를 되살리지 않는다
     dropOutbox(id);
+    markDeleted(id);
     render();
     if (!ideas[id]) return toast('지웠어요');
     return run(store.remove(id), '지웠어요');
@@ -299,6 +319,7 @@ function openEdit(id, x) {
 async function saveEdit() {
   const t = $('#edit-t').value.trim();
   if (!t || !editing) return;
+  if (!ideas[editing]) { $('#edit').close(); editing = null; return toast('다른 곳에서 지워진 쪽지예요.'); }
   const part = { t, tag: chipVal('etag'), hot: $('#edit-hot').checked || null, ed: Date.now() };
   // 클로드가 읽은 뒤 고쳤으면 다시 «새 쪽지»로 돌려 다음에 또 읽게 한다
   if (ideas[editing]?.st === 'seen' && t !== ideas[editing].t) part.st = 'new';

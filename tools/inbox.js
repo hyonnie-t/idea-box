@@ -50,7 +50,8 @@ if (cmd === 'seen') {
   for (const id of rest) { if (!data[id]) { console.error('없는 쪽지:', id); continue; } if (data[id].st === 'new') patch(id, { st: 'seen' }); }
   console.log(`읽음 표시: ${rest.length}개`);
 } else if (cmd === 'done' || cmd === 'reply') {
-  const [id, re] = rest;
+  const id = rest[0];
+  const re = (rest[1] || '').trim();
   if (cmd === 'reply' && !re) { console.error('reply에는 답장 글이 있어야 해요'); process.exit(1); }
   const data = readAll();
   if (!data[id]) { console.error('없는 쪽지:', id); process.exit(1); }
