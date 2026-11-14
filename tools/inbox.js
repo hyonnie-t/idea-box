@@ -17,6 +17,9 @@ const UID = 'uPzJdaRI9JSHxy0IX0PyUMeXR963';
 const PROJECT = 'timetable-af612';
 const BASE = `/users/${UID}/ideas`;
 const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+// --save <파일>: 세션 시작 동기화(sync-pc.ps1)가 뒤에서 부른다. 숫자만 파일에 남기고 화면엔 아무것도 안 쓴다.
+const SAVE = (() => { const i = process.argv.indexOf('--save'); return i > 0 ? process.argv[i + 1] : ''; })();
+function writeSave(o) { try { fs.writeFileSync(SAVE, JSON.stringify({ ...o, at: Date.now() })); } catch (e) {} }
 
 function fbcli(args) {
   const r = spawnSync(NPX, ['--yes', 'firebase-tools', ...args, '--project', PROJECT], {
@@ -24,6 +27,7 @@ function fbcli(args) {
   });
   if (r.status !== 0) {
     const err = (r.stderr || r.stdout || '').trim().split('\n').slice(-3).join('\n');
+    if (SAVE) { writeSave({ err: /login|auth|credentials/i.test(err) ? 'login' : 'fail' }); process.exit(0); }
     console.error('firebase-tools 실패:', err);
     if (/login|auth|credentials/i.test(err)) console.error('→ 효니 터미널에서: npx firebase-tools login');
     process.exit(1);
@@ -64,6 +68,7 @@ if (cmd === 'seen') {
   const data = readAll();
   const list = Object.entries(data).map(([id, v]) => ({ id, ...v }));
   const n = (s) => list.filter((x) => x.st === s).length;
+  if (SAVE) { writeSave({ new: n('new'), hot: list.filter((x) => x.st === 'new' && x.hot).length, seen: n('seen') }); process.exit(0); }
   if (cmd === '--count') { console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}`); process.exit(0); }
   const shown = list.filter((x) => cmd === '--all' || x.st !== 'done')
     .sort((a, b) => (a.st === 'new' ? 0 : 1) - (b.st === 'new' ? 0 : 1) || (b.hot ? 1 : 0) - (a.hot ? 1 : 0) || a.at - b.at);
