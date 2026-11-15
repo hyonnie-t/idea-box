@@ -1,6 +1,7 @@
 // 클로드 쪽지함 화면. 쪽지는 Firebase users/{주인uid}/ideas, ?demo=1이면 메모리에만.
 // 보낼 쪽지는 먼저 이 기기(localStorage 우편함)에 넣고 Firebase에 올라가면 뺀다 — 인터넷이 끊겨도 쪽지를 잃지 않게.
 import * as fb from './fb.js';
+import { shrink, newPicKey, MAX_PICS } from './pics.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -25,6 +26,17 @@ const ls = {
 };
 const OUTBOX = 'ideabox-outbox';
 const DRAFT = 'ideabox-draft';
+// 사진: 우편함 쪽지의 사진은 OUTBOX_PICS {쪽지id: {사진키: {s, b}}}, 쓰던 쪽지의 사진은 DRAFT_PICS [{k, s, b}].
+// 기기 저장 칸(보통 5MB)이 모자라면 이 화면 메모리에만 두고(memOutPics) 알린다.
+const OUTBOX_PICS = 'ideabox-outbox-pics';
+const DRAFT_PICS = 'ideabox-draft-pics';
+const memOutPics = {};
+const trySet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } };
+const outPics = (id) => memOutPics[id] || ls.get(OUTBOX_PICS, {})[id] || null;
+function dropOutPics(id) { delete memOutPics[id]; const m = ls.get(OUTBOX_PICS, {}); if (m[id]) { delete m[id]; trySet(OUTBOX_PICS, m); } }
+let composePics = []; // 쓰는 중인 쪽지에 붙인 사진 [{k, s, b}]
+let editPics = []; // 고치기 창의 사진 [{k, s?, b?, old}] — old면 이미 올라간 사진
+const thumbs = new Map(); // `${쪽지id}/${사진키}` → 작은 그림(한 번 받으면 다시 안 받음)
 const newId = () => 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 function demoStore() {
@@ -34,13 +46,26 @@ function demoStore() {
     d2: { t: '시간표 앱 할 일 탭에 «이번 주만 보기» 단추가 있으면 좋겠다', at: now - 3600e3 * 5, tag: '시간표', st: 'seen' },
     d3: { t: '다음 주 수업 웹앱 아이디어: 학생이 사료 카드를 시대순으로 끌어다 놓기', at: now - 600e3, tag: '수업', st: 'new', hot: true },
   };
+  // 데모 사진 한 장(그려서 만든 그림)
+  const c = document.createElement('canvas'); c.width = 640; c.height = 480;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 640, 480); gr.addColorStop(0, '#ffd8b8'); gr.addColorStop(1, '#bcd6ff');
+  g.fillStyle = gr; g.fillRect(0, 0, 640, 480);
+  g.fillStyle = '#22304a'; g.font = 'bold 56px sans-serif'; g.fillText('데모 사진', 180, 260);
+  const demoPic = { s: c.toDataURL('image/jpeg', 0.6), b: c.toDataURL('image/jpeg', 0.8) };
+  data.d2.ph = ['pdemo'];
+  const pics = { d2: { pdemo: demoPic } };
   let cb = () => {};
   const emit = () => setTimeout(() => cb(structuredClone(data)), 120);
+  const wait = () => new Promise((r) => setTimeout(r, 150));
   return {
     async watch(f) { cb = f; emit(); },
     async create(id, item) { if (!data[id]) data[id] = item; emit(); },
-    async patch(id, part) { data[id] = { ...data[id], ...part }; emit(); },
-    async remove(id) { delete data[id]; emit(); },
+    async patch(id, part) { data[id] = { ...data[id], ...part }; for (const k of Object.keys(part)) if (part[k] === null) delete data[id][k]; emit(); },
+    async remove(id) { delete data[id]; delete pics[id]; emit(); },
+    async putPics(id, p) { await wait(); pics[id] = { ...pics[id], ...p }; },
+    async dropPics(id, keys) { for (const k of keys) delete pics[id]?.[k]; },
+    async getPic(id, k, size) { await wait(); return pics[id]?.[k]?.[size] || ''; },
   };
 }
 
@@ -74,7 +99,7 @@ async function start() {
 }
 function offlineStore() {
   const no = () => Promise.reject(new Error('offline'));
-  return { offline: true, async watch(cb) { cb({}); }, create: no, patch: no, remove: no };
+  return { offline: true, async watch(cb) { cb({}); }, create: no, patch: no, remove: no, putPics: no, dropPics: no, getPic: no };
 }
 
 function gate(msg = '') {
@@ -139,7 +164,98 @@ function bind() {
       downOut = false;
     });
   }
+  // 사진: 고르기(폰은 찍기·앨범 고르기가 같이 뜸)·붙여넣기(PC 캡처)·빼기·크게 보기
+  $('#pic-in').addEventListener('change', (e) => { addPics([...e.target.files], 'compose'); e.target.value = ''; });
+  $('#edit-pic-in').addEventListener('change', (e) => { addPics([...e.target.files], 'edit'); e.target.value = ''; });
+  const onPaste = (which) => (e) => {
+    const files = [...(e.clipboardData?.files || [])].filter((f) => /^image\//.test(f.type));
+    if (!files.length) return;
+    e.preventDefault();
+    addPics(files, which);
+  };
+  $('#t').addEventListener('paste', onPaste('compose'));
+  $('#edit-t').addEventListener('paste', onPaste('edit'));
+  $('#pics').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-rm]');
+    if (b) { composePics = composePics.filter((p) => p.k !== b.dataset.rm); renderComposePics(); saveDraft(); }
+  });
+  $('#edit-pics').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-rm]');
+    if (b) { editPics = editPics.filter((p) => p.k !== b.dataset.rm); renderEditPics(); }
+  });
+  $('#viewer-close').addEventListener('click', () => $('#viewer').close());
+  $('#viewer').addEventListener('click', (e) => { if (e.target.id === 'viewer' || e.target.id === 'viewer-img') $('#viewer').close(); });
+  $('#viewer').addEventListener('close', () => { $('#viewer-img').removeAttribute('src'); });
   window.addEventListener('online', flush);
+}
+
+// ---------- 사진 ----------
+// 줄이는 동안 보내기·저장을 막는다(줄인 사진이 다음 쪽지에 잘못 붙지 않게). editGen은 고치기 창을 다시 열면 바뀐다.
+const shrinking = { compose: 0, edit: 0 };
+let editGen = 0;
+async function addPics(files, which) {
+  const get = () => (which === 'compose' ? composePics : editPics);
+  const draw = which === 'compose' ? renderComposePics : renderEditPics;
+  const gen = editGen;
+  const room = MAX_PICS - get().length - shrinking[which];
+  if (room <= 0) return toast(`사진은 ${MAX_PICS}장까지 붙일 수 있어요.`);
+  const take = files.slice(0, room);
+  if (files.length > room) toast(`사진은 ${MAX_PICS}장까지라 ${room}장만 붙였어요.`);
+  shrinking[which] += take.length; draw();
+  for (const f of take) {
+    let p = null;
+    try { p = { k: newPicKey(), ...(await shrink(f)) }; } catch (e) { toast('이 사진은 열지 못했어요.'); }
+    if (which === 'edit' && gen !== editGen) continue; // 그사이 창을 닫고 다른 쪽지를 열었으면 버린다(숫자는 openEdit가 0으로 돌려 둠)
+    shrinking[which]--;
+    if (p) get().push(p);
+    draw();
+  }
+  if (which === 'compose') saveDraft();
+}
+function picStrip(list, alt, busy) {
+  // 이미 올라간 사진(old)은 src 없이 data-pic만 두고 fillThumbs가 채운다
+  return list.map((p, i) => `<span class="pic"><img${p.s ? ` src="${esc(p.s)}"` : ''} alt="${alt} ${i + 1}"${p.src ? ` data-pic="${esc(p.src)}"` : ''}><button type="button" class="pic-rm" data-rm="${esc(p.k)}" aria-label="사진 ${i + 1} 빼기">×</button></span>`).join('')
+    + '<span class="pic pic-busy" role="status" aria-label="사진 줄이는 중"></span>'.repeat(busy);
+}
+function renderComposePics() {
+  $('#pics').innerHTML = picStrip(composePics, '붙인 사진', shrinking.compose);
+  $('#pics').hidden = !composePics.length && !shrinking.compose;
+  $('#pic-add').hidden = composePics.length + shrinking.compose >= MAX_PICS;
+}
+function renderEditPics() {
+  $('#edit-pics').innerHTML = picStrip(editPics, '쪽지 사진', shrinking.edit);
+  $('#edit-pics').hidden = !editPics.length && !shrinking.edit;
+  $('#edit-pic-add').hidden = editPics.length + shrinking.edit >= MAX_PICS;
+  fillThumbs($('#edit-pics'));
+}
+// 카드·고치기 창의 작은 그림을 채운다(처음 한 번만 받아 와서 기억)
+function fillThumbs(root) {
+  for (const img of root.querySelectorAll('img[data-pic]')) {
+    if (img.getAttribute('src') || !img.dataset.pic) continue;
+    const key = img.dataset.pic;
+    // thumbs 값: 그림 주소 / null 받는 중(받으면 아래에서 채움) / '' 서버에 없음
+    if (thumbs.has(key)) { const v = thumbs.get(key); if (v) img.src = v; else if (v === '') img.closest('.pic, .thumb')?.classList.add('gone'); continue; }
+    const [id, k] = key.split('/');
+    const local = outPics(id)?.[k];
+    if (local) { img.src = local.s; continue; }
+    if (!store || store.offline) continue;
+    thumbs.set(key, null); // 받는 중(겹쳐 부르지 않게)
+    store.getPic(id, k, 's').then((u) => {
+      thumbs.set(key, u);
+      document.querySelectorAll(`img[data-pic="${CSS.escape(key)}"]`).forEach((el) => { if (u) el.src = u; else el.closest('.pic, .thumb')?.classList.add('gone'); });
+    }).catch(() => thumbs.delete(key));
+  }
+}
+async function viewPic(id, k, i) {
+  const d = $('#viewer');
+  const img = $('#viewer-img');
+  img.alt = `쪽지 사진 ${i + 1}`;
+  const local = outPics(id)?.[k];
+  const first = local?.b || thumbs.get(`${id}/${k}`); // 큰 그림이 오기 전엔 작은 그림을 늘려 보여 준다
+  if (first) img.src = first; else img.removeAttribute('src');
+  d.showModal();
+  if (local || !store || store.offline) return;
+  try { const u = await withTimeout(store.getPic(id, k, 'b'), 15000); if (u && d.open) img.src = u; } catch (e) { toast('큰 사진을 받지 못했어요.'); }
 }
 
 function buildChips(box, name, def) {
@@ -157,8 +273,11 @@ function grow(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHe
 
 function saveDraft() {
   const t = $('#t').value;
-  ls.set(DRAFT, t.trim() ? { t, tag: chipVal('tag'), hot: $('#hot').checked } : null);
-  $('#draft').textContent = t.trim() ? '임시 저장됨' : '';
+  const has = t.trim() || composePics.length;
+  ls.set(DRAFT, has ? { t, tag: chipVal('tag'), hot: $('#hot').checked } : null);
+  // 사진은 따로(기기 저장 칸이 모자라면 사진만 못 남김)
+  const picsOk = trySet(DRAFT_PICS, composePics.length ? composePics : null);
+  $('#draft').textContent = !has ? '' : picsOk ? '임시 저장됨' : '글만 임시 저장됨(사진은 기기에 자리가 없어요)';
 }
 function restoreDraft() {
   const d = ls.get(DRAFT, null);
@@ -166,8 +285,10 @@ function restoreDraft() {
   $('#t').value = d.t || '';
   setChip('tag', d.tag);
   $('#hot').checked = !!d.hot;
+  composePics = (ls.get(DRAFT_PICS, []) || []).filter((p) => p && p.k && p.s && p.b).slice(0, MAX_PICS);
+  renderComposePics();
   grow($('#t'));
-  if (d.t) $('#draft').textContent = '쓰던 글을 불러왔어요';
+  if (d.t || composePics.length) $('#draft').textContent = '쓰던 글을 불러왔어요';
 }
 
 // 안드로이드 «공유하기»로 들어온 글·주소를 입력칸에 채운다(manifest share_target)
@@ -191,15 +312,26 @@ function takeShare() {
 
 async function send() {
   const t = $('#t').value.trim();
-  if (!t) { $('#t').focus(); return; }
+  if (shrinking.compose) return toast('사진을 줄이는 중이에요. 잠깐만요.');
+  if (!t && !composePics.length) { $('#t').focus(); return; } // 사진만 있는 쪽지도 된다
   const id = newId();
   const item = { t, at: Date.now(), tag: chipVal('tag'), st: 'new' };
   if ($('#hot').checked) item.hot = true;
+  if (composePics.length) {
+    item.ph = composePics.map((p) => p.k);
+    const pics = Object.fromEntries(composePics.map((p) => [p.k, { s: p.s, b: p.b }]));
+    const m = ls.get(OUTBOX_PICS, {});
+    m[id] = pics;
+    if (!trySet(OUTBOX_PICS, m)) memOutPics[id] = pics; // 기기 칸이 모자라면 이 화면에서만 들고 있다가 올린다
+  }
   const box = ls.get(OUTBOX, {});
   box[id] = item;
   ls.set(OUTBOX, box);
   $('#t').value = '';
   $('#hot').checked = false;
+  composePics = [];
+  renderComposePics();
+  trySet(DRAFT_PICS, null);
   grow($('#t'));
   ls.set(DRAFT, null);
   $('#draft').textContent = '';
@@ -223,7 +355,17 @@ async function flush() {
     const id = Object.keys(box).find((k) => !tried.has(k));
     if (!id) break;
     tried.add(id);
-    try { await withTimeout(store.create(id, box[id]), 8000); dropOutbox(id); } catch (e) { failed++; }
+    try {
+      // 사진을 먼저 올리고 쪽지를 만든다. 사진이 이 기기에서 사라졌으면(저장 칸 부족 뒤 새로고침) 사진 표시만 빼고 올린다.
+      let item = box[id];
+      const pics = item.ph?.length ? outPics(id) : null;
+      if (item.ph?.length && !pics) item = { ...item, ph: null, t: (item.t ? item.t + '\n' : '') + '(사진은 올리지 못했어요)' };
+      if (pics) await withTimeout(store.putPics(id, pics), 30000);
+      // 사진을 올리는 사이 지웠으면 쪽지를 만들지 않고 올린 사진도 지운다
+      if (ls.get(DELETED, {})[id]) { await store.remove(id).catch(() => {}); continue; }
+      await withTimeout(store.create(id, item), 8000);
+      dropOutbox(id); dropOutPics(id);
+    } catch (e) { failed++; }
   }
   if (failed) status('인터넷이 끊겨 쪽지를 이 기기에 모아 뒀어요. 연결되면 올라가요.');
   flushing = false;
@@ -268,6 +410,7 @@ function render(fresh) {
   const empty = $('#empty');
   empty.hidden = shown.length > 0;
   empty.textContent = items.length ? '여기엔 쪽지가 없어요.' : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
+  fillThumbs(ol);
   reveal();
 }
 
@@ -275,10 +418,13 @@ function card(x) {
   const ico = (TAGS.find(([t]) => t === x.tag) || TAGS[0])[1];
   const st = x.pending ? '<span class="badge wait">올라가길 기다리는 중</span>' : `<span class="badge ${x.st}">${STATES[x.st] || ''}</span>`;
   const re = x.re ? `<div class="reply"><span class="who">클로드</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : '';
+  const ph = Array.isArray(x.ph) ? x.ph.filter(Boolean) : [];
+  const pics = ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : '';
   const doneBtn = x.st === 'done' ? '<button type="button" data-act="reopen">다시 열기</button>' : '<button type="button" data-act="done">끝남으로</button>';
   return `<li class="card${x.hot && x.st !== 'done' ? ' is-hot' : ''}${x.st === 'done' ? ' is-done' : ''}${shownIds.has(x.id) ? ' show' : ''}" data-id="${esc(x.id)}">
     <div class="meta"><span class="tag">${ico} ${esc(x.tag || '일반')}</span>${x.hot ? '<span class="hotmark">🔥 급해요</span>' : ''}<time>${when(x.at)}${x.ed ? ' · 고침' : ''}</time></div>
-    <p class="text">${esc(x.t)}</p>
+    ${x.t ? `<p class="text">${esc(x.t)}</p>` : ''}
+    ${pics}
     ${re}
     <div class="row">${st}<span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">고치기</button>${doneBtn}`}<button type="button" class="del" data-act="del">지우기</button></span></div>
   </li>`;
@@ -290,10 +436,12 @@ async function onListClick(e) {
   const id = b.closest('[data-id]').dataset.id;
   const x = ideas[id];
   const act = b.dataset.act;
+  if (act === 'pic') return viewPic(id, b.dataset.k, Number(b.dataset.i) || 0);
   if (act === 'del') {
     if (!(await ask('이 쪽지를 지울까요? 되돌릴 수 없어요.'))) return;
     // 우편함에서 먼저 빼야 다음 올리기가 지운 쪽지를 되살리지 않는다
     dropOutbox(id);
+    dropOutPics(id);
     markDeleted(id);
     render();
     if (!ideas[id]) return toast('지웠어요');
@@ -313,19 +461,40 @@ function openEdit(id, x) {
   $('#edit-t').value = x.t;
   setChip('etag', x.tag);
   $('#edit-hot').checked = !!x.hot;
+  editGen++;
+  shrinking.edit = 0; // 앞 창에서 줄이던 사진은 버리므로 «줄이는 중» 칸도 비운다
+  editPics = (Array.isArray(x.ph) ? x.ph.filter(Boolean) : []).map((k) => ({ k, src: `${id}/${k}`, old: true }));
+  renderEditPics();
   $('#edit').showModal();
   grow($('#edit-t'));
 }
 async function saveEdit() {
   const t = $('#edit-t').value.trim();
-  if (!t || !editing) return;
-  if (!ideas[editing]) { $('#edit').close(); editing = null; return toast('다른 곳에서 지워진 쪽지예요.'); }
+  if (!editing) return;
+  if (shrinking.edit) return toast('사진을 줄이는 중이에요. 잠깐만요.');
+  if (!t && !editPics.length) { $('#edit-t').focus(); return toast('글이나 사진 중 하나는 있어야 해요.'); }
+  const id = editing;
+  const cur = ideas[id];
+  if (!cur) { $('#edit').close(); editing = null; return toast('다른 곳에서 지워진 쪽지예요.'); }
+  const oldKeys = Array.isArray(cur.ph) ? cur.ph.filter(Boolean) : [];
+  const newKeys = editPics.map((p) => p.k);
+  const added = editPics.filter((p) => !p.old);
+  const removed = oldKeys.filter((k) => !newKeys.includes(k));
+  const picsChanged = added.length > 0 || removed.length > 0;
   const part = { t, tag: chipVal('etag'), hot: $('#edit-hot').checked || null, ed: Date.now() };
-  // 클로드가 읽은 뒤 고쳤으면 다시 «새 쪽지»로 돌려 다음에 또 읽게 한다
-  if (ideas[editing]?.st === 'seen' && t !== ideas[editing].t) part.st = 'new';
+  if (picsChanged) part.ph = newKeys.length ? newKeys : null;
+  // 클로드가 읽은 뒤 글이나 사진을 고쳤으면 다시 «새 쪽지»로 돌려 다음에 또 읽게 한다
+  if (cur.st === 'seen' && (t !== (cur.t || '') || picsChanged)) part.st = 'new';
   $('#edit').close();
-  await run(store.patch(editing, part), '고쳤어요');
   editing = null;
+  // 순서: 새 사진 올리기 → 쪽지 고치기 → 뺀 사진 지우기(중간에 끊겨도 쪽지가 없는 사진을 가리키지 않게)
+  try {
+    await withTimeout(store.putPics(id, Object.fromEntries(added.map((p) => [p.k, { s: p.s, b: p.b }]))), 30000);
+    await withTimeout(store.patch(id, part), 8000);
+    for (const p of added) thumbs.set(`${id}/${p.k}`, p.s);
+    toast('고쳤어요');
+  } catch (e) { return toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
+  store.dropPics(id, removed).catch(() => {});
 }
 
 // 앱 안 확인 창(브라우저 confirm 대신)

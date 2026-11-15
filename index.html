@@ -47,11 +47,13 @@
   <div id="content" hidden>
     <form class="compose" id="compose" autocomplete="off">
       <label class="vh" for="t">클로드에게 남길 생각</label>
-      <textarea id="t" name="t" rows="4" placeholder="떠오른 생각을 그대로 적어 두세요. 다음 세션에서 클로드가 읽어요." required maxlength="4000"></textarea>
+      <textarea id="t" name="t" rows="4" placeholder="떠오른 생각을 그대로 적어 두세요. 다음 세션에서 클로드가 읽어요." maxlength="4000"></textarea>
+      <div class="pic-strip" id="pics" hidden aria-label="붙인 사진"></div>
       <fieldset class="chips" id="tags">
         <legend>어느 일이에요?</legend><div class="chip-row"></div>
       </fieldset>
       <div class="compose-foot">
+        <label class="pic-add" id="pic-add"><input type="file" id="pic-in" accept="image/*" multiple class="vh"><span>📷 사진</span></label>
         <label class="hot"><input type="checkbox" id="hot"> <span>🔥 급해요</span></label>
         <span class="draft" id="draft" aria-live="polite"></span>
         <button type="submit" class="primary" id="send">쪽지 넣기</button>
@@ -79,16 +81,25 @@
   <form id="edit-form">
     <h2 id="edit-title">쪽지 고치기</h2>
     <label class="vh" for="edit-t">쪽지 글</label>
-    <textarea id="edit-t" rows="6" required maxlength="4000"></textarea>
+    <textarea id="edit-t" rows="6" maxlength="4000"></textarea>
+    <div class="pic-strip" id="edit-pics" hidden aria-label="쪽지 사진"></div>
     <fieldset class="chips" id="edit-tags">
       <legend>어느 일이에요?</legend><div class="chip-row"></div>
     </fieldset>
-    <label class="hot"><input type="checkbox" id="edit-hot"> <span>🔥 급해요</span></label>
+    <div class="edit-row">
+      <label class="pic-add" id="edit-pic-add"><input type="file" id="edit-pic-in" accept="image/*" multiple class="vh"><span>📷 사진 더하기</span></label>
+      <label class="hot"><input type="checkbox" id="edit-hot"> <span>🔥 급해요</span></label>
+    </div>
     <div class="sheet-foot">
       <button type="button" class="text-btn" id="edit-cancel">그만두기</button>
       <button type="submit" class="primary">저장</button>
     </div>
   </form>
+</dialog>
+
+<dialog class="viewer" id="viewer" aria-label="사진 크게 보기">
+  <img id="viewer-img" alt="">
+  <button type="button" class="viewer-close" id="viewer-close" aria-label="닫기">×</button>
 </dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
