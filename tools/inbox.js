@@ -24,10 +24,11 @@ const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 const SAVE = (() => { const i = process.argv.indexOf('--save'); return i > 0 ? process.argv[i + 1] : ''; })();
 function writeSave(o) { try { fs.writeFileSync(SAVE, JSON.stringify({ ...o, at: Date.now() })); } catch (e) {} }
 
-function fbcli(args) {
+function fbcli(args, soft = false) {
   const r = spawnSync(NPX, ['--yes', 'firebase-tools', ...args, '--project', PROJECT], {
     encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, shell: process.platform === 'win32', env: { ...process.env, MSYS_NO_PATHCONV: '1' },
   });
+  if (r.status !== 0 && soft) return null; // 사진 받기 실패는 목록을 끊지 않는다
   if (r.status !== 0) {
     const err = (r.stderr || r.stdout || '').trim().split('\n').slice(-3).join('\n');
     if (SAVE) { writeSave({ err: /login|auth|credentials/i.test(err) ? 'login' : 'fail' }); process.exit(0); }
@@ -51,20 +52,22 @@ function patch(id, part) {
 }
 
 // 사진 내려받기: 쪽지 하나의 사진을 한 번에 읽어 큰 그림을 jpg 파일로 쓴다. 반환: 파일 경로 목록
+// 파일 이름에 사진키를 넣어, 이미 받은 사진은 다시 받지 않는다(사진이 바뀌면 키가 바뀜).
 const PIC_DIR = path.join(os.tmpdir(), 'ideabox-pics');
 function savePics(id, ph) {
   if (!/^[\w-]+$/.test(id)) return [];
-  const keys = (Array.isArray(ph) ? ph : Object.values(ph || {})).filter(Boolean);
+  const keys = (Array.isArray(ph) ? ph : Object.values(ph || {})).filter((k) => typeof k === 'string' && /^[\w-]+$/.test(k));
   if (!keys.length) return [];
+  const file = (k) => path.join(PIC_DIR, `${id}-${k}.jpg`);
+  if (keys.every((k) => fs.existsSync(file(k)))) return keys.map(file);
   let all = {};
-  try { all = JSON.parse(fbcli(['database:get', q(`/users/${UID}/ideaPics/${id}`)]).trim()) || {}; } catch (e) { return ['(사진을 읽지 못함)']; }
+  try { all = JSON.parse((fbcli(['database:get', q(`/users/${UID}/ideaPics/${id}`)], true) || '').trim()) || {}; } catch (e) { return [`(사진을 읽지 못함 — 나중에: node tools/inbox.js pics ${id})`]; }
   fs.mkdirSync(PIC_DIR, { recursive: true });
   return keys.map((k, i) => {
-    const m = /^data:image\/(\w+);base64,(.+)$/.exec((all[k] && (all[k].b || all[k].s)) || '');
+    const m = /^data:image\/\w+;base64,(.+)$/.exec((all[k] && (all[k].b || all[k].s)) || '');
     if (!m) return `(사진 ${i + 1} 없음)`;
-    const f = path.join(PIC_DIR, `${id}-${i + 1}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`);
-    fs.writeFileSync(f, Buffer.from(m[2], 'base64'));
-    return f;
+    fs.writeFileSync(file(k), Buffer.from(m[1], 'base64'));
+    return file(k);
   });
 }
 

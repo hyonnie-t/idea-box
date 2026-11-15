@@ -14,7 +14,7 @@
 - `tools/inbox.js` Claude 쪽 도구(firebase-tools CLI, 이 PC가 효니 계정으로 로그인돼 있어야 함, 한 번에 10초쯤):
   - `node tools/inbox.js` 안 끝난 쪽지 보기(새 쪽지·급한 것 먼저) / `--count` 숫자만 / `--all`
   - `node tools/inbox.js seen <id…>` 읽음, `reply <id> "답장"` 답장+읽음, `done <id> "답장"` 끝남+답장. 효니가 쓴 글 `t`는 건드리지 않는다.
-  - 사진 있는 쪽지는 목록에 «📷 사진 N장»과 내려받은 파일 경로(`%TEMP%\ideabox-pics\{id}-{n}.jpg`)가 나온다 → Read로 열어 본다. `--no-pics`면 안 받고, `pics <id>`로 따로 받는다.
+  - 사진 있는 쪽지는 목록에 «📷 사진 N장»과 내려받은 파일 경로(`%TEMP%\ideabox-pics\{id}-{사진키}.jpg`, 이미 받은 건 다시 안 받음)가 나온다 → Read로 열어 본다. `--no-pics`면 안 받고, `pics <id>`로 따로 받는다.
 - `tools/serve.js` 내 PC 확인용(127.0.0.1:8802, 교사업무 launch 이름 `idea-box`). `?demo=1`은 가짜 쪽지·메모리 저장.
 - `icons/` 아이콘(편지 봉투+귤색 우표, SVG를 헤드리스 크롬으로 PNG로 구움). `js/vendor/lucian-icons` 새로고침 아이콘(MIT).
 

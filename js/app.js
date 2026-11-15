@@ -205,8 +205,8 @@ async function addPics(files, which) {
   for (const f of take) {
     let p = null;
     try { p = { k: newPicKey(), ...(await shrink(f)) }; } catch (e) { toast('이 사진은 열지 못했어요.'); }
+    if (which === 'edit' && gen !== editGen) continue; // 그사이 창을 닫고 다른 쪽지를 열었으면 버린다(숫자는 openEdit가 0으로 돌려 둠)
     shrinking[which]--;
-    if (which === 'edit' && gen !== editGen) continue; // 그사이 창을 닫고 다른 쪽지를 열었으면 버린다
     if (p) get().push(p);
     draw();
   }
@@ -233,15 +233,16 @@ function fillThumbs(root) {
   for (const img of root.querySelectorAll('img[data-pic]')) {
     if (img.getAttribute('src') || !img.dataset.pic) continue;
     const key = img.dataset.pic;
-    if (thumbs.has(key)) { if (thumbs.get(key)) img.src = thumbs.get(key); continue; } // ''이면 받는 중 — 받으면 아래에서 채운다
+    // thumbs 값: 그림 주소 / null 받는 중(받으면 아래에서 채움) / '' 서버에 없음
+    if (thumbs.has(key)) { const v = thumbs.get(key); if (v) img.src = v; else if (v === '') img.closest('.pic, .thumb')?.classList.add('gone'); continue; }
     const [id, k] = key.split('/');
     const local = outPics(id)?.[k];
     if (local) { img.src = local.s; continue; }
     if (!store || store.offline) continue;
-    thumbs.set(key, ''); // 받는 중(겹쳐 부르지 않게)
+    thumbs.set(key, null); // 받는 중(겹쳐 부르지 않게)
     store.getPic(id, k, 's').then((u) => {
       thumbs.set(key, u);
-      document.querySelectorAll(`img[data-pic="${CSS.escape(key)}"]`).forEach((el) => { if (u) el.src = u; else el.closest('.pic')?.classList.add('gone'); });
+      document.querySelectorAll(`img[data-pic="${CSS.escape(key)}"]`).forEach((el) => { if (u) el.src = u; else el.closest('.pic, .thumb')?.classList.add('gone'); });
     }).catch(() => thumbs.delete(key));
   }
 }
@@ -360,6 +361,8 @@ async function flush() {
       const pics = item.ph?.length ? outPics(id) : null;
       if (item.ph?.length && !pics) item = { ...item, ph: null, t: (item.t ? item.t + '\n' : '') + '(사진은 올리지 못했어요)' };
       if (pics) await withTimeout(store.putPics(id, pics), 30000);
+      // 사진을 올리는 사이 지웠으면 쪽지를 만들지 않고 올린 사진도 지운다
+      if (ls.get(DELETED, {})[id]) { await store.remove(id).catch(() => {}); continue; }
       await withTimeout(store.create(id, item), 8000);
       dropOutbox(id); dropOutPics(id);
     } catch (e) { failed++; }
@@ -459,6 +462,7 @@ function openEdit(id, x) {
   setChip('etag', x.tag);
   $('#edit-hot').checked = !!x.hot;
   editGen++;
+  shrinking.edit = 0; // 앞 창에서 줄이던 사진은 버리므로 «줄이는 중» 칸도 비운다
   editPics = (Array.isArray(x.ph) ? x.ph.filter(Boolean) : []).map((k) => ({ k, src: `${id}/${k}`, old: true }));
   renderEditPics();
   $('#edit').showModal();
@@ -480,7 +484,7 @@ async function saveEdit() {
   const part = { t, tag: chipVal('etag'), hot: $('#edit-hot').checked || null, ed: Date.now() };
   if (picsChanged) part.ph = newKeys.length ? newKeys : null;
   // 클로드가 읽은 뒤 글이나 사진을 고쳤으면 다시 «새 쪽지»로 돌려 다음에 또 읽게 한다
-  if (cur.st === 'seen' && (t !== cur.t || picsChanged)) part.st = 'new';
+  if (cur.st === 'seen' && (t !== (cur.t || '') || picsChanged)) part.st = 'new';
   $('#edit').close();
   editing = null;
   // 순서: 새 사진 올리기 → 쪽지 고치기 → 뺀 사진 지우기(중간에 끊겨도 쪽지가 없는 사진을 가리키지 않게)
