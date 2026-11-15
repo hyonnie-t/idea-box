@@ -6,13 +6,15 @@
 
 ## 구조
 - 저장: 책장·시간표·글감 서랍과 같은 Firebase `timetable-af612` RTDB `users/{주인uid}/ideas/{id}`. 주인 로그인 뒤에만 읽고 쓴다(로그인 코드는 글감 서랍 `js/fb.js`와 같은 방식, 앱 이름 `idea-box`로 같은 주소의 다른 앱 로그인과 섞이지 않음).
-- 쪽지 칸: `t` 글, `at` 쓴 때(ms), `tag` 주제(일반·책장·시간표·수업·학교 일·글·블로그·대학원·도구), `hot` 급해요, `st` new|seen|done, `re` Claude 답장, `rat` 답장 때, `ed` 고친 때.
+- 쪽지 칸: `t` 글(사진이 있으면 비어도 됨), `at` 쓴 때(ms), `tag` 주제(일반·책장·시간표·수업·학교 일·글·블로그·대학원·도구), `hot` 급해요, `st` new|seen|done, `re` Claude 답장, `rat` 답장 때, `ed` 고친 때, `ph` 사진키 목록.
+- 사진(2026-11-15, 효니 쪽지 «쪽지에 사진 첨부할 수 없어? 넣으면 좋을듯»): RTDB `users/{주인uid}/ideaPics/{쪽지id}/{사진키}` = `{ s 작은 그림(긴 변 320), b 큰 그림(긴 변 1280) }` JPEG data URL. 쪽지당 4장. 기기에서 줄여 올린다(`js/pics.js`). Firebase Storage는 쓰지 않는다 — 2024-10 뒤 새 Storage는 유료(Blaze) 요금제가 있어야 하고, RTDB는 기존 규칙(`users/$uid` 본인만)·무료 한도(저장 1GB·내려받기 월 10GB) 안에서 그대로 된다(Claude 판단). 목록은 `ideas`만 실시간으로 받고 사진은 카드가 그려질 때 작은 그림만 한 번 받는다(`thumbs` 기억). 큰 그림은 눌렀을 때만.
 - `js/app.js` 화면 전부. 보낼 쪽지는 먼저 기기 우편함(localStorage `ideabox-outbox`)에 넣고 올라가면 뺀다 — 쪽지 id를 기기에서 만들어 다시 올려도 겹치지 않는다. 쓰던 글은 `ideabox-draft`. 확인·고치기는 앱 안 `<dialog>`.
 - `manifest.webmanifest`의 `share_target`(GET title·text·url): 안드로이드 «공유하기»로 링크·글을 바로 쪽지 칸에 넣는다. 아이폰은 지원 안 됨.
 - `sw.js` 앱 파일만 캐시(쪽지는 캐시 안 함). 앱 파일을 바꾸면 `VERSION`을 올린다.
 - `tools/inbox.js` Claude 쪽 도구(firebase-tools CLI, 이 PC가 효니 계정으로 로그인돼 있어야 함, 한 번에 10초쯤):
   - `node tools/inbox.js` 안 끝난 쪽지 보기(새 쪽지·급한 것 먼저) / `--count` 숫자만 / `--all`
   - `node tools/inbox.js seen <id…>` 읽음, `reply <id> "답장"` 답장+읽음, `done <id> "답장"` 끝남+답장. 효니가 쓴 글 `t`는 건드리지 않는다.
+  - 사진 있는 쪽지는 목록에 «📷 사진 N장»과 내려받은 파일 경로(`%TEMP%\ideabox-pics\{id}-{n}.jpg`)가 나온다 → Read로 열어 본다. `--no-pics`면 안 받고, `pics <id>`로 따로 받는다.
 - `tools/serve.js` 내 PC 확인용(127.0.0.1:8802, 교사업무 launch 이름 `idea-box`). `?demo=1`은 가짜 쪽지·메모리 저장.
 - `icons/` 아이콘(편지 봉투+귤색 우표, SVG를 헤드리스 크롬으로 PNG로 구움). `js/vendor/lucian-icons` 새로고침 아이콘(MIT).
 
@@ -21,3 +23,23 @@
 - 쪽지는 효니의 생각이므로 다른 곳(공개 레포·공개 페이지)에 옮기지 않는다.
 - 화면 확인: 폰 375·태블릿 768/1180·PC, 다크 모드. 간격은 8pt 토큰만(`--space-1~7`).
 - 홈 화면 앱(아이폰) 로그인은 구글 클라우드 콘솔 «승인된 리디렉션 주소»에 `https://hyonnie-t.github.io/idea-box/`가 있어야 된다(효니가 콘솔에서).
+- 새 칸·단추·창을 더하면 아래 «연결 점검표»에 줄을 더하고 빈칸을 채운 뒤 PR한다(출처: 효니 말 2026-11-14 «새로운 기능을 넣으면 기존의 기능과 모두 연결성과 호환성이 이어지도록 해야해»).
+
+## 연결 점검표 (2026-11-15, 사진 첨부 때 만듦)
+앱 사정: 갱신은 `sw.js` VERSION·FILES(새 파일이면 FILES에도) / 바깥에서 쓰는 곳은 `tools/inbox.js`와 `클로드작업\sync-pc.ps1`(`inbox.js --save`로 숫자만) / 저장 갈래는 실시간(`onValue` ideas) + 기기 우편함(localStorage) / 다크 있음 / 데모 `?demo=1`(사진 한 장 든 쪽지 d2).
+
+| 흐름 \ 칸 | 글·주제·급해요 | 사진(`ph` + `ideaPics`) |
+|---|---|---|
+| 쓰기·임시 저장 | `ideabox-draft` | `ideabox-draft-pics`(칸이 모자라면 글만 남기고 알림) |
+| 보내기·우편함·끊김 | `ideabox-outbox`, 없을 때만 만들기 | `ideabox-outbox-pics` → 사진 먼저 올리고 쪽지 만들기. 칸이 모자라면 화면 메모리에 들고 올림, 새로고침으로 잃으면 «(사진은 올리지 못했어요)»를 글에 붙여 올림 |
+| 줄이는 중 보내기·저장 | — | 막고 «잠깐만요». 고치기 창을 닫고 다시 열면 늦게 끝난 사진은 버림(`editGen`) |
+| 붙여넣기 | 글 | 그림 붙여넣기 = 사진 붙이기(PC 캡처) |
+| 공유하기(안드로이드) | 글·주소 | 받지 않음(GET 방식이라 파일 불가) |
+| 목록·거르기·숫자 | 그대로 | 작은 그림 칸, 누르면 크게(`#viewer`) |
+| 고치기 | 그대로 | 빼기·더하기. 새 사진 올리기 → 쪽지 고치기 → 뺀 사진 지우기. 읽음 뒤 사진을 바꿔도 «새 쪽지»로 |
+| 끝남·다시 열기 | 상태만 | 그대로 둠 |
+| 지우기·지운 쪽지 되살아남 막기 | `markDeleted`·`buryDeleted` | `remove`가 `ideas/{id}`와 `ideaPics/{id}`를 한 번에 지움, 우편함 사진도 뺌 |
+| Claude 도구 seen/reply/done | 상태·답장만 | 건드리지 않음. 목록에서 사진을 내려받아 경로 출력 |
+| 세션 시작 숫자(`--save`) | 숫자 | 사진 안 받음 |
+| 새로고침·새 버전 | VERSION | `js/pics.js` FILES에 넣음, v4 |
+- 남은 메모: Claude가 쪽지를 지우는 명령은 없다(지우기는 앱에서만). 안드로이드 공유하기로 사진 받기는 POST 방식+서비스워커 처리가 필요해 이번엔 안 함.

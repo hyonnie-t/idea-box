@@ -6,6 +6,9 @@
 //   node tools/inbox.js seen <id> [<id>…]           «클로드가 읽음»으로
 //   node tools/inbox.js done <id> "답장"             «끝남» + 답장(앱 카드에 말풍선으로 보임)
 //   node tools/inbox.js reply <id> "답장"            답장만 달고 «읽음»으로(아직 할 일이 남았을 때)
+//   node tools/inbox.js pics <id>                    그 쪽지 사진을 내려받아 파일 경로 출력(Read로 열어 보기)
+// 사진이 있는 쪽지는 목록을 볼 때 사진을 임시 폴더(%TEMP%\ideabox-pics)에 내려받아 경로를 같이 보여 준다(--no-pics면 안 받음).
+// 사진 자료: users/{uid}/ideaPics/{쪽지id}/{사진키} = { s 작은 그림, b 큰 그림 } (JPEG data URL), 쪽지의 ph = [사진키…]
 // 쓰기(seen/done/reply)는 상태·답장 칸만 바꾼다. 효니가 쓴 글(t)은 건드리지 않는다.
 process.noDeprecation = true; // Windows에서 npx.cmd를 shell로 부를 때 나오는 경고 숨김(인자는 id 검사·따옴표로 감쌈)
 const { spawnSync } = require('child_process');
@@ -23,7 +26,7 @@ function writeSave(o) { try { fs.writeFileSync(SAVE, JSON.stringify({ ...o, at: 
 
 function fbcli(args) {
   const r = spawnSync(NPX, ['--yes', 'firebase-tools', ...args, '--project', PROJECT], {
-    encoding: 'utf8', shell: process.platform === 'win32', env: { ...process.env, MSYS_NO_PATHCONV: '1' },
+    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, shell: process.platform === 'win32', env: { ...process.env, MSYS_NO_PATHCONV: '1' },
   });
   if (r.status !== 0) {
     const err = (r.stderr || r.stdout || '').trim().split('\n').slice(-3).join('\n');
@@ -47,6 +50,24 @@ function patch(id, part) {
   try { fbcli(['database:update', q(`${BASE}/${id}`), q(tmp), '--force']); } finally { fs.rmSync(tmp, { force: true }); }
 }
 
+// 사진 내려받기: 쪽지 하나의 사진을 한 번에 읽어 큰 그림을 jpg 파일로 쓴다. 반환: 파일 경로 목록
+const PIC_DIR = path.join(os.tmpdir(), 'ideabox-pics');
+function savePics(id, ph) {
+  if (!/^[\w-]+$/.test(id)) return [];
+  const keys = (Array.isArray(ph) ? ph : Object.values(ph || {})).filter(Boolean);
+  if (!keys.length) return [];
+  let all = {};
+  try { all = JSON.parse(fbcli(['database:get', q(`/users/${UID}/ideaPics/${id}`)]).trim()) || {}; } catch (e) { return ['(사진을 읽지 못함)']; }
+  fs.mkdirSync(PIC_DIR, { recursive: true });
+  return keys.map((k, i) => {
+    const m = /^data:image\/(\w+);base64,(.+)$/.exec((all[k] && (all[k].b || all[k].s)) || '');
+    if (!m) return `(사진 ${i + 1} 없음)`;
+    const f = path.join(PIC_DIR, `${id}-${i + 1}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`);
+    fs.writeFileSync(f, Buffer.from(m[2], 'base64'));
+    return f;
+  });
+}
+
 const when = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const [cmd, ...rest] = process.argv.slice(2);
 
@@ -54,6 +75,12 @@ if (cmd === 'seen') {
   const data = readAll();
   for (const id of rest) { if (!data[id]) { console.error('없는 쪽지:', id); continue; } if (data[id].st === 'new') patch(id, { st: 'seen' }); }
   console.log(`읽음 표시: ${rest.length}개`);
+} else if (cmd === 'pics') {
+  const id = rest[0];
+  const data = readAll();
+  if (!data[id]) { console.error('없는 쪽지:', id); process.exit(1); }
+  const files = savePics(id, data[id].ph);
+  console.log(files.length ? files.join('\n') : '(사진 없는 쪽지)');
 } else if (cmd === 'done' || cmd === 'reply') {
   const id = rest[0];
   const re = (rest[1] || '').trim();
@@ -74,8 +101,13 @@ if (cmd === 'seen') {
     .sort((a, b) => (a.st === 'new' ? 0 : 1) - (b.st === 'new' ? 0 : 1) || (b.hot ? 1 : 0) - (a.hot ? 1 : 0) || a.at - b.at);
   console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}\n`);
   for (const x of shown) {
-    console.log(`[${x.id}] ${x.st}${x.hot ? ' 🔥급함' : ''} · ${x.tag || '일반'} · ${when(x.at)}`);
-    console.log('  ' + String(x.t).replace(/\n/g, '\n  '));
+    const nPh = (Array.isArray(x.ph) ? x.ph : Object.values(x.ph || {})).filter(Boolean).length;
+    console.log(`[${x.id}] ${x.st}${x.hot ? ' 🔥급함' : ''} · ${x.tag || '일반'} · ${when(x.at)}${nPh ? ` · 📷 사진 ${nPh}장` : ''}`);
+    console.log('  ' + (x.t ? String(x.t).replace(/\n/g, '\n  ') : '(글 없이 사진만)'));
+    if (nPh) {
+      if (process.argv.includes('--no-pics')) console.log(`  📷 사진 보기: node tools/inbox.js pics ${x.id}`);
+      else for (const f of savePics(x.id, x.ph)) console.log('  📷 ' + f);
+    }
     if (x.re) console.log('  ↳ 클로드 답장: ' + x.re.replace(/\n/g, ' '));
     console.log('');
   }
