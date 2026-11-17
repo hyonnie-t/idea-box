@@ -90,6 +90,12 @@ if (cmd === 'seen') {
   if (cmd === 'reply' && !re) { console.error('reply에는 답장 글이 있어야 해요'); process.exit(1); }
   const data = readAll();
   if (!data[id]) { console.error('없는 쪽지:', id); process.exit(1); }
+  // 다른 세션이 이미 «끝남»으로 닫은 쪽지는 덮지 않는다(2026-11-17: 매일 받아 두기가 먼저 읽은 목록으로
+  // 3분 뒤 reply를 달아 다른 세션의 done 답장을 지움). 일부러 다시 열 때만 --force.
+  if (data[id].st === 'done' && !process.argv.includes('--force')) {
+    console.error(`${id}: 이미 끝남(답장: ${data[id].re || '없음'}) — 덮지 않았어요. 바꾸려면 --force`);
+    process.exit(2);
+  }
   const part = { st: cmd === 'done' ? 'done' : 'seen' };
   if (re) Object.assign(part, { re, rat: Date.now() });
   patch(id, part);
