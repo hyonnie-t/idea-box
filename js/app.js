@@ -54,7 +54,8 @@ function demoStore() {
     d3: { t: '다음 주 수업 웹앱 아이디어: 학생이 사료 카드를 시대순으로 끌어다 놓기', at: now - 600e3, tag: '수업', st: 'new', hot: true },
     d4: { t: '책장 표지 색을 좀 더 따뜻하게 바꾸고 싶어', at: now - 86400e3 * 3, tag: '책장', st: 'seen', ask: true, again: true, re: '«따뜻하게»가 귤색 쪽이에요, 아니면 바랜 종이색 쪽이에요?\n고르시면 바로 바꿔 둘게요.', rat: now - 86400e3 * 2 },
     d5: { t: '시간표 위젯 글씨가 작아\n폰에서 보면 한눈에 안 들어와', at: now - 86400e3 * 4, tag: '시간표', st: 'seen', re: '받아 뒀어요. 위젯 글씨 크기 고치기를 작업 현황에 올렸어요.', rat: now - 86400e3 * 3 },
-    d7: { t: '블로그 글감 폴더 정리해 줘', at: now - 3600e3 * 2, tag: '글·블로그', st: 'seen', go: now - 60e3 },
+    d7: { t: '블로그 글감 폴더 정리해 줘', at: now - 3600e3 * 2, tag: '글·블로그', st: 'seen', go: now - 60e3, run: { pc: 'CHAN', at: now - 60e3, n: 'wait' } },
+    d9: { t: '위시리스트 앱 가격 알림 넣어 줘', at: now - 3600e3 * 6, tag: '일반', st: 'seen', go: now - 1800e3, run: { pc: 'USER', at: now - 1800e3, n: 'wait' } },
     d8: { t: '책장 앱 검색창 글씨 크기 키워 줘', at: now - 3600e3 * 3, tag: '책장', st: 'seen', go: now - 600e3, run: { pc: 'CHAN', at: now - 300e3 } },
     d6: { t: '쪽지함 도구 정리', at: now - 86400e3 * 6, tag: '도구', st: 'done', re: '정리했어요.', rat: now - 86400e3 * 5 },
   };
@@ -78,6 +79,8 @@ function demoStore() {
     async putPics(id, p) { await wait(); pics[id] = { ...pics[id], ...p }; },
     async dropPics(id, keys) { for (const k of keys) delete pics[id]?.[k]; },
     async getPic(id, k, size) { await wait(); return pics[id]?.[k]?.[size] || ''; },
+    // 데모 PC 셋: 켜짐 / 켜졌지만 클로드를 못 엶 / 꺼짐. ?demo=1&nopc=1 이면 켜진 PC 없음
+    async runners() { await wait(); const t = Date.now(); return { CHAN: { at: new URLSearchParams(location.search).has('nopc') ? t - 7200e3 : t - 20e3, ok: true }, '신영현-학생자치': { at: t - 40e3, ok: false, why: 'claude 명령을 찾지 못해요' }, USER: { at: t - 86400e3 * 2, ok: true } }; },
   };
 }
 
@@ -111,7 +114,7 @@ async function start() {
 }
 function offlineStore() {
   const no = () => Promise.reject(new Error('offline'));
-  return { offline: true, async watch(cb) { cb({}); }, create: no, patch: no, remove: no, putPics: no, dropPics: no, getPic: no };
+  return { offline: true, async watch(cb) { cb({}); }, create: no, patch: no, remove: no, putPics: no, dropPics: no, getPic: no, runners: no };
 }
 
 function gate(msg = '') {
@@ -176,7 +179,7 @@ function bind() {
   $('#edit-form').addEventListener('submit', (e) => { e.preventDefault(); saveEdit(); });
   $('#edit-cancel').addEventListener('click', () => $('#edit').close());
   $('#edit-t').addEventListener('input', (e) => grow(e.target));
-  for (const d of [$('#ask'), $('#edit')]) {
+  for (const d of [$('#ask'), $('#edit'), $('#pick')]) {
     // 바깥(어두운 곳)을 누르면 닫기
     // 창 자체에는 여백을 두지 않고(안쪽 form이 여백을 가짐) 바깥 좌표인지까지 본다 — 창 가장자리를 눌러 고치던 글이 날아가지 않게
     // 누른 곳과 뗀 곳이 모두 창 밖일 때만 닫는다(글을 고르다 바깥에서 손을 떼도 안 닫히게)
@@ -454,16 +457,22 @@ const firstLine = (s) => (String(s || '').split('\n').find((l) => l.trim()) || '
 // 체크·되돌리기 patch(같은 계산을 카드 «끝남으로»·판 체크·되돌리기 줄이 함께 쓴다)
 // «답 필요»(ask)는 건드리지 않는다: 끝난 쪽지엔 표시가 안 되고, 나중에 «다시 열기»하면 질문이 그대로 돌아온다.
 // (Claude가 inbox.js reply/done을 하면 그때 꺼짐)
-function planCheck(x) { return { patch: { st: 'done', go: null }, undo: { st: x.st === 'done' ? 'seen' : x.st || 'new', go: x.go || null } }; }
+// 고른 PC가 아직 안 가져간 쪽지(run.n 'wait')를 끝내면 그 예약도 같이 지운다(끝난 쪽지를 실행기가 붙들지 않게). 하는 중인 run은 실행기가 정리한다.
+function planCheck(x) { const w = isWait(x); return { patch: { st: 'done', go: null, ...(w ? { run: null } : {}) }, undo: { st: x.st === 'done' ? 'seen' : x.st || 'new', go: x.go || null, ...(w ? { run: x.run } : {}) } }; }
 // 다시 열 때 남은 go·run은 지운다(글감 옮기기 등 바깥에서 끝남이 된 쪽지를 열자마자 실행기가 시작하지 않게)
 function planReopen(x) { return { patch: { st: x.re ? 'seen' : 'new', go: null, run: null }, undo: { st: 'done', go: x.go || null, run: x.run || null } }; }
 // 클로드에게 시키기(2026-11-18): 판에서 안 끝난 쪽지를 체크하면 go(시킨 때)를 쓰고, PC 실행기(tools/runner.js)가 가져가 run {pc, at}을 쓴다.
 // 클로드가 inbox.js done/reply/ask를 하면 go·run이 지워진다. 하는 중(run)엔 체크를 못 풀고, 4시간 넘게 멈춰 있으면 풀 수 있다.
+// PC 고르기(2026-11-18, 출처: 효니 말 «왜 켜진 컴퓨터 말고 학교 PC가 가져갔냐», «차라리 나한테 물어보는 게 낫지않냐»): 체크하면 켜진 PC를 보여 주고 고르게 한다.
+// 고른 PC는 run { pc, at, n: 'wait' }로 적는다 — 그 PC 실행기만 가져가고, 옛 실행기는 run이 있는 쪽지를 건드리지 않는다.
 const STALE = 4 * 3600e3;
-const isRun = (x) => !!x.run && x.st !== 'done' && !x.pending;
+const SLOW = 3 * 60e3; // 고른 PC가 이만큼 지나도 안 가져가면 알린다(실행기는 1분마다 봄)
+const LIVE = 150e3; // 켜짐 신호가 이 안에 있으면 켜진 PC
+const isWait = (x) => !!x.run && x.run.n === 'wait' && x.st !== 'done' && !x.pending;
+const isRun = (x) => !!x.run && x.run.n !== 'wait' && x.st !== 'done' && !x.pending;
 const isStale = (x) => isRun(x) && Date.now() - (x.run.at || 0) > STALE;
-const isGo = (x) => (!!x.go || isRun(x)) && x.st !== 'done' && !x.pending;
-function planGo(x) { return { patch: { go: Date.now(), again: null }, undo: { go: null, again: x.again || null } }; }
+const isGo = (x) => (!!x.go || isRun(x) || isWait(x)) && x.st !== 'done' && !x.pending;
+function planGo(x, pc) { const now = Date.now(); return { patch: { go: now, again: null, run: { pc, at: now, n: 'wait' } }, undo: { go: null, again: x.again || null, run: null } }; }
 function planStop(x) { return { patch: { go: null, run: null }, undo: { go: x.go || null, run: x.run || null } }; }
 
 function renderBoard(items, fresh) {
@@ -472,7 +481,7 @@ function renderBoard(items, fresh) {
   const nHot = open.filter((x) => x.hot).length;
   const nGo = open.filter(isGo).length;
   $('#board-sum').innerHTML = items.length
-    ? `남은 일 <b>${open.length}</b>${nAsk ? ` · <span class="sum-ask">❓ 답 필요 <b>${nAsk}</b></span>` : ''}${nHot ? ` · <span class="sum-hot">🔥 급해요 <b>${nHot}</b></span>` : ''}${nGo ? ` · <span class="sum-go">🤖 시킨 일 <b>${nGo}</b></span>` : ''}<br><span class="sum-help">체크하면 클로드가 바로 시작해요(PC가 켜져 있을 때). 다 하면 답장이 달려요.</span>`
+    ? `남은 일 <b>${open.length}</b>${nAsk ? ` · <span class="sum-ask">❓ 답 필요 <b>${nAsk}</b></span>` : ''}${nHot ? ` · <span class="sum-hot">🔥 급해요 <b>${nHot}</b></span>` : ''}${nGo ? ` · <span class="sum-go">🤖 시킨 일 <b>${nGo}</b></span>` : ''}<br><span class="sum-help">체크하면 어느 PC에서 할지 물어봐요. 고른 PC에서 클로드가 시작하고, 다 하면 답장이 달려요.</span>`
     : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
   // 묶음: 주제 순서대로, 남은 일이 있는 묶음 먼저. 모르는 주제는 «일반»에.
   const known = new Set(TAGS.map(([t]) => t));
@@ -523,6 +532,7 @@ function row(x) {
   const sub = x.pending ? '<span class="tsub wait">올라가길 기다리는 중</span>'
     : stale ? '<span class="tsub wait">⚠️ 멈춘 것 같아요 — 체크를 풀고 다시 체크해 주세요</span>'
     : running ? `<span class="tsub go">⏳ 클로드가 하는 중 · ${esc(x.run.pc || '')}</span>`
+    : isWait(x) ? (Date.now() - (x.run.at || 0) > SLOW ? `<span class="tsub wait">⚠️ ${esc(x.run.pc || '')}가 아직 안 가져갔어요 — 체크를 풀고 다시 골라 주세요</span>` : `<span class="tsub go">🤖 시켰어요 · ${esc(x.run.pc || '')}에서 곧 시작해요</span>`)
     : go ? '<span class="tsub go">🤖 시켰어요 · 곧 시작해요</span>'
     : x.re ? `<span class="tsub${ask ? ' ask' : ''}">${ask ? '❓ ' : '클로드: '}${esc(firstLine(x.re))}</span>` : '';
   const marks = `${x.hot && !done ? '<span class="tmark hot" title="급해요">🔥</span>' : ''}${ph.length ? '<span class="tmark" title="사진">📷</span>' : ''}`;
@@ -575,10 +585,18 @@ function onBoardCheck(e) {
 }
 // 시키기 또는 취소. 되돌리기 줄은 끝남 체크와 같다.
 async function goItem(id, x, on) {
-  const plan = on ? planGo(x) : planStop(x);
+  let pc = '';
+  if (on) {
+    pc = await pickPc();
+    if (!pc) return render(); // 그만둠 → 체크 풀기
+    if (!ideas[id] || ideas[id].st === 'done' || isRun(ideas[id])) { render(); return toast('그새 쪽지가 바뀌었어요.'); }
+    x = ideas[id];
+  }
+  const plan = on ? planGo(x, pc) : planStop(x);
   try {
     await withTimeout(store.patch(id, plan.patch), 8000);
-    showUndo(on ? '클로드에게 시켰어요' : '시키기를 취소했어요', id, plan.undo);
+    if (on) ls.set(LASTPC, pc);
+    showUndo(on ? `${pc}에서 하라고 시켰어요` : '시키기를 취소했어요', id, plan.undo);
   } catch (e) { hideUndo(); render(); toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
 }
 // 체크(끝남) 또는 풀기(다시 열기). 되돌리기 줄을 목록 밖 아래에 띄운다.
@@ -617,7 +635,7 @@ function card(x) {
   const pics = ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : '';
   const doneBtn = x.st === 'done' ? '<button type="button" data-act="reopen">다시 열기</button>' : '<button type="button" data-act="done">끝남으로</button>';
   return `<li class="card${x.hot && x.st !== 'done' ? ' is-hot' : ''}${x.st === 'done' ? ' is-done' : ''}${shownIds.has(x.id) ? ' show' : ''}" data-id="${esc(x.id)}">
-    <div class="meta"><span class="tag">${ico} ${esc(x.tag || '일반')}</span>${x.hot ? '<span class="hotmark">🔥 급해요</span>' : ''}${ask ? '<span class="askmark">❓ 답 필요</span>' : ''}${isRun(x) ? '<span class="gomark">⏳ 클로드가 하는 중</span>' : isGo(x) ? '<span class="gomark">🤖 시킴</span>' : ''}<time>${when(x.at)}${x.ed ? ' · 고침' : ''}</time></div>
+    <div class="meta"><span class="tag">${ico} ${esc(x.tag || '일반')}</span>${x.hot ? '<span class="hotmark">🔥 급해요</span>' : ''}${ask ? '<span class="askmark">❓ 답 필요</span>' : ''}${isRun(x) ? '<span class="gomark">⏳ 클로드가 하는 중</span>' : isWait(x) ? `<span class="gomark">🤖 시킴 · ${esc(x.run.pc || '')}</span>` : isGo(x) ? '<span class="gomark">🤖 시킴</span>' : ''}<time>${when(x.at)}${x.ed ? ' · 고침' : ''}</time></div>
     ${x.t ? `<p class="text">${esc(x.t)}</p>` : ''}
     ${pics}
     ${re}
@@ -689,7 +707,8 @@ async function saveEdit() {
   // «답 필요» 쪽지에 글·사진을 더했으면 답한 것으로 보고 끈다(위 줄이 «새 쪽지»로 돌려 클로드가 다시 읽음)
   if (cur.ask && cur.st !== 'done' && (t !== (cur.t || '') || picsChanged)) { part.ask = null; part.st = 'new'; }
   // 시킨 일을 하다 클로드가 물은 것(again)에 답하면 다시 시켜 이어서 하게 한다
-  if (part.ask === null && cur.again) { part.go = Date.now(); part.again = null; }
+  // 하던 PC(spc)를 다시 고른 것으로 적는다(그 PC에 세션이 있어 이어서 할 수 있음). 모르면 예전처럼 먼저 본 PC가.
+  if (part.ask === null && cur.again) { part.go = Date.now(); part.again = null; if (cur.spc) part.run = { pc: cur.spc, at: part.go, n: 'wait' }; }
   $('#edit').close();
   editing = null;
   // 순서: 새 사진 올리기 → 쪽지 고치기 → 뺀 사진 지우기(중간에 끊겨도 쪽지가 없는 사진을 가리키지 않게)
@@ -700,6 +719,32 @@ async function saveEdit() {
     toast(part.go ? '답을 넣었어요. 클로드가 이어서 해요' : part.ask === null ? '답을 넣었어요. 클로드가 다음에 읽어요' : '고쳤어요');
   } catch (e) { return toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
   store.dropPics(id, removed).catch(() => {});
+}
+
+// «어느 PC에서 할까요?» 창. 켜져 있고 클로드를 열 수 있는 PC만 누를 수 있다. 고른 PC 이름 또는 ''(그만둠).
+const LASTPC = 'ideabox-last-pc';
+const ago = (ms) => (ms < 3600e3 ? `${Math.max(1, Math.round(ms / 60e3))}분 전` : ms < 86400e3 ? `${Math.round(ms / 3600e3)}시간 전` : `${Math.round(ms / 86400e3)}일 전`);
+async function pickPc() {
+  let rs;
+  try { rs = await withTimeout(store.runners(), 8000); } catch (e) { toast('PC 목록을 불러오지 못했어요. 인터넷을 확인해 주세요.'); return ''; }
+  const now = Date.now();
+  const last = ls.get(LASTPC, '');
+  const list = Object.entries(rs || {}).filter(([, r]) => r && r.at).map(([pc, r]) => ({ pc, at: r.at, live: now - r.at < LIVE, ok: !!r.ok, why: r.why || '' }))
+    .sort((a, b) => (b.live && b.ok ? 1 : 0) - (a.live && a.ok ? 1 : 0) || (b.pc === last ? 1 : 0) - (a.pc === last ? 1 : 0) || b.at - a.at);
+  const can = list.filter((r) => r.live && r.ok);
+  const d = $('#pick');
+  $('#pick-help').textContent = can.length ? '켜져 있는 PC만 고를 수 있어요.' : list.length ? '지금 켜진 PC가 없어요. PC에서 클로드 Code를 한 번 열면 1~2분 뒤 여기에 떠요.' : '아직 준비된 PC가 없어요. PC에서 클로드 Code를 한 번 열어 주세요.';
+  $('#pick-list').innerHTML = list.map((r) => `<li><button type="button" class="pc${r.live && r.ok ? '' : ' off'}" data-pc="${esc(r.pc)}"${r.live && r.ok ? '' : ' disabled'}><span class="pc-name">💻 ${esc(r.pc)}</span><span class="pc-st">${!r.live ? `꺼져 있어요 · ${ago(now - r.at)}` : r.ok ? '켜져 있어요' : `켜져 있지만 클로드를 못 열어요${r.why ? ` (${esc(r.why)})` : ''}`}</span></button></li>`).join('');
+  return new Promise((ok) => {
+    const onPick = (e) => { const b = e.target.closest('button[data-pc]'); if (b && !b.disabled) d.close('pc:' + b.dataset.pc); };
+    const onClose = () => { d.removeEventListener('close', onClose); $('#pick-list').removeEventListener('click', onPick); $('#pick-no').onclick = null; ok(d.returnValue.startsWith('pc:') ? d.returnValue.slice(3) : ''); };
+    $('#pick-list').addEventListener('click', onPick);
+    $('#pick-no').onclick = () => d.close('');
+    d.returnValue = '';
+    d.addEventListener('close', onClose);
+    d.showModal();
+    ($('#pick-list button:not([disabled])') || $('#pick-no')).focus();
+  });
 }
 
 // 앱 안 확인 창(브라우저 confirm 대신)

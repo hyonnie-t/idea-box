@@ -106,5 +106,7 @@ export function firebaseStore() {
     async putPics(id, pics) { if (!Object.keys(pics).length) return; const s = await load(); await s.dbM.update(s.dbM.ref(s.db, `${PICS}/${id}`), pics); },
     async dropPics(id, keys) { if (!keys.length) return; const s = await load(); await s.dbM.update(s.dbM.ref(s.db, `${PICS}/${id}`), Object.fromEntries(keys.map((k) => [k, null]))); },
     async getPic(id, k, size) { const s = await load(); const v = await s.dbM.get(s.dbM.ref(s.db, `${PICS}/${id}/${k}/${size}`)); return v.val() || ''; },
+    // PC 실행기들의 켜짐 신호 { PC이름: { at, ok, why } } (tools/runner.js가 1분마다 씀). 체크할 때 한 번 읽는다.
+    async runners() { const s = await load(); const v = await s.dbM.get(s.dbM.ref(s.db, `${ROOT}/ideaRunners`)); return v.val() || {}; },
   };
 }
