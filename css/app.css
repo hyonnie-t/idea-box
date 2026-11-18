@@ -315,6 +315,11 @@ html:has(dialog[open]) { overflow: hidden; }
 /* 낮은 폰 화면에서도 «보내기»가 늘 보이게 아래에 붙인다(창 안에서 위 내용만 밀림) */
 .reply-sheet .sheet-foot { flex-wrap: wrap; position: sticky; bottom: calc(-1 * var(--space-4)); background: var(--paper); padding-block: var(--space-2) var(--space-4); margin-bottom: calc(-1 * var(--space-4)); }
 .reply-sheet .reply-edit { margin-right: auto; }
+/* 보내고 시키기: 보내기(기본) 옆 두 번째 단추 — 테두리 단추로 높이만 맞춤 */
+.go-btn { min-height: 48px; color: var(--sky); border-color: var(--sky); font-weight: 700; }
+.go-btn[hidden] { display: none; }
+/* 두 보내기 단추는 줄이 바뀌어도 함께 오른쪽에 */
+.send-pair { display: flex; gap: var(--space-2); margin-left: auto; }
 
 /* 할 일 판 */
 .board { margin-top: var(--space-3); }
