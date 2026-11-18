@@ -4,6 +4,7 @@
 //   node tools/inbox.js --count    숫자만 (새 N · 읽음 N)
 //   node tools/inbox.js --all      끝난 것까지
 //   node tools/inbox.js --done-ids 끝남 쪽지 id만(한 줄에 하나)
+//   node tools/inbox.js --asks     «효니에게 물을 것»(src 칸, tools/asks.js가 올림) 열린 것 — 쪽지 목록·숫자·--save new에는 안 섞임(2026-11-18)
 //   node tools/inbox.js seen <id> [<id>…]           «클로드가 읽음»으로
 //   node tools/inbox.js done <id> "답장"             «끝남» + 답장(앱 카드에 말풍선으로 보임)
 //   node tools/inbox.js reply <id> "답장"            답장만 달고 «읽음»으로(아직 할 일이 남았을 때)
@@ -99,7 +100,9 @@ if (cmd === 'seen') {
   const x = data[id];
   if (!x) { console.error('없는 쪽지:', id); process.exit(1); }
   console.log(`[${id}] ${x.st} · ${x.tag || '일반'} · ${when(x.at)}${x.hot ? ' · 🔥급함' : ''}${x.ed ? ` · 고침 ${when(x.ed)}` : ''}`);
+  if (x.src) console.log(`📌 효니에게 물을 것 · 출처: ${x.src.l || ''} (교사업무/${x.src.f || '?'})${x.src.d ? `\n   답이 없으면: ${x.src.d}` : ''}`);
   console.log(x.t ? String(x.t) : '(글 없이 사진만)');
+  if (x.src) console.log(x.a ? `\n✍️ 효니 답(${when(x.aat || x.ed || x.at)}): ${x.a}${x.aw ? ' — 출처 파일에 적혀 있음' : ''}` : '\n(효니 답 없음 — 시켰다면 «답이 없으면» 기본값으로)');
   for (const f of savePics(id, x.ph)) console.log('📷 ' + f);
   if (x.re) console.log(`\n↳ 앞서 클로드가 단 ${x.ask ? '질문' : '답장'}: ${x.re}`);
 } else if (cmd === 'done' || cmd === 'reply' || cmd === 'ask') {
@@ -123,17 +126,32 @@ if (cmd === 'seen') {
   console.log(`${id} → ${part.st}${cmd === 'ask' ? ' ❓답 필요 (질문 달음)' : re ? ' (답장 달음)' : ''}`);
 } else {
   const data = readAll();
-  const list = Object.entries(data).map(([id, v]) => ({ id, ...v }));
+  // «효니에게 물을 것»(src 칸, tools/asks.js가 올림)은 효니 쪽지가 아니라 따로 센다 — 받아 두기·숫자에 섞이지 않게(2026-11-18)
+  const every = Object.entries(data).map(([id, v]) => ({ id, ...v }));
+  const asks = every.filter((x) => x.src && x.st !== 'done');
+  const qa = asks.filter((x) => x.a && !x.go && !x.run).length; // 답만 오고 시키지 않은 것
+  const list = every.filter((x) => !x.src);
   const n = (s) => list.filter((x) => x.st === s).length;
-  if (SAVE) { writeSave({ new: n('new'), hot: list.filter((x) => x.st === 'new' && x.hot).length, seen: n('seen') }); process.exit(0); }
+  if (SAVE) { writeSave({ new: n('new'), hot: list.filter((x) => x.st === 'new' && x.hot).length, seen: n('seen'), qn: asks.length, qa }); process.exit(0); }
+  const qPart = asks.length ? `\n📌 효니에게 물을 것: 열림 ${asks.length}${qa ? ` · 답 온 것 ${qa}(시키지 않음 — 출처 파일의 «→ 효니 답» 줄을 보고 이어 가기)` : ''} — 자세히: node tools/inbox.js --asks` : '';
+  if (cmd === '--asks') {
+    for (const x of asks.sort((a, b) => (b.a ? 1 : 0) - (a.a ? 1 : 0) || a.at - b.at)) {
+      console.log(`[${x.id}] ${x.a ? '✍️ 답 옴' : '❓ 답 기다림'}${x.run ? ' 🤖하는 중' : x.go ? ' 🤖시킴' : ''} · ${x.src.l || ''} (교사업무/${x.src.f})`);
+      console.log('  ' + String(x.t || '').replace(/\n/g, ' ') + (x.src.d ? `\n  답이 없으면: ${x.src.d}` : ''));
+      if (x.a) console.log(`  ✍️ 효니 답: ${String(x.a).replace(/\n/g, ' ')}${x.aw ? ' (파일에 적음)' : ''}`);
+      console.log('');
+    }
+    if (!asks.length) console.log('(열린 물을 것 없음)');
+    process.exit(0);
+  }
   const nAsk = list.filter((x) => x.ask && x.st !== 'done').length;
   const askPart = nAsk ? ` · 답 기다림 ${nAsk}` : '';
   // 끝남 쪽지 id만 한 줄에 하나(받아 두기가 작업 현황의 💌 줄을 대조해 지울 때)
   if (cmd === '--done-ids') { console.log(list.filter((x) => x.st === 'done').map((x) => x.id).join('\n')); process.exit(0); }
-  if (cmd === '--count') { console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}${askPart}`); process.exit(0); }
+  if (cmd === '--count') { console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}${askPart}${qPart}`); process.exit(0); }
   const shown = list.filter((x) => cmd === '--all' || x.st !== 'done')
     .sort((a, b) => (a.st === 'new' ? 0 : 1) - (b.st === 'new' ? 0 : 1) || (b.hot ? 1 : 0) - (a.hot ? 1 : 0) || a.at - b.at);
-  console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}${askPart}\n`);
+  console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}${askPart}${qPart}\n`);
   for (const x of shown) {
     const nPh = (Array.isArray(x.ph) ? x.ph : Object.values(x.ph || {})).filter(Boolean).length;
     // 답장(rat) 뒤에 효니가 고친(ed) 새 쪽지 = 효니가 답했거나 덧붙임 → 받아 두기는 seen만(답장으로 덮지 않음)
