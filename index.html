@@ -104,7 +104,7 @@
     <div class="ask-q" id="edit-ask" hidden>
       <p class="ask-who">❓ 클로드가 물어요</p>
       <p class="ask-text" id="edit-ask-q"></p>
-      <p class="ask-help">아래 글 끝에 답을 덧붙이고 저장하면 클로드가 다음에 읽어요.</p>
+      <p class="ask-help"></p>
     </div>
     <label class="vh" for="edit-t">쪽지 글</label>
     <textarea id="edit-t" rows="6" maxlength="4000"></textarea>
@@ -119,6 +119,20 @@
     <div class="sheet-foot">
       <button type="button" class="text-btn" id="edit-cancel">그만두기</button>
       <button type="submit" class="primary">저장</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet reply-sheet" id="reply" aria-labelledby="reply-title">
+  <form id="reply-form">
+    <h2 id="reply-title">클로드에게 답하기</h2>
+    <div class="reply-thread" id="reply-thread"></div>
+    <div class="reply-qs" id="reply-qs"></div>
+    <p class="reply-help" id="reply-help"></p>
+    <div class="sheet-foot">
+      <button type="button" class="text-btn reply-edit" id="reply-edit">글 고치기</button>
+      <button type="button" class="text-btn" id="reply-cancel">닫기</button>
+      <button type="submit" class="primary" id="reply-send">보내기</button>
     </div>
   </form>
 </dialog>

@@ -9,8 +9,10 @@
 //   node tools/inbox.js done <id> "답장"             «끝남» + 답장(앱 카드에 말풍선으로 보임)
 //   node tools/inbox.js reply <id> "답장"            답장만 달고 «읽음»으로(아직 할 일이 남았을 때)
 //   node tools/inbox.js ask <id> "질문"              효니에게 물을 것: 답장 칸에 질문 + «답 필요»(ask) 켜기 + «읽음»
-//        효니가 앱에서 «답하기»로 글을 덧붙이면 앱이 ask를 끄고 «새 쪽지»로 돌린다. reply/done도 ask를 끈다.
-//        목록에서 «✍️ 효니가 답장 뒤 고침» 줄 = 답장(rat) 뒤에 효니가 고친(ed) 새 쪽지 → 받아 두기는 «받아 둠» 답장 대신 seen만
+//        질문 쓰는 법: 물을 것이 여럿이면 «① …» «② …» 줄마다 하나, 고를 것은 줄 끝 «[가 / 나 / 다]» → 앱이 질문마다 답 칸·번호 단추를 보인다.
+//        효니가 앱 «답하기»로 답하면 대화(th)에 효니 말이 쌓이고(원래 글 t는 그대로) ask가 꺼지고 «새 쪽지»로. reply/done도 ask를 끈다.
+//        목록 «💬 효니가 답함» = 답장(rat) 뒤 효니 답(hat), «✍️ 효니가 답장 뒤 고침» = 답장 뒤 원래 글을 고침(ed) → 받아 두기는 둘 다 seen만
+// 답하기 스레드(2026-11-18): reply/done/ask는 대화 칸 th에 클로드 말을 더하고 re·rat(마지막 말 사본)도 쓴다. 목록·show는 대화를 때 순서로 보인다.
 //   node tools/inbox.js pics <id>                    그 쪽지 사진을 내려받아 파일 경로 출력(Read로 열어 보기)
 //   node tools/inbox.js show <id>                    쪽지 하나 전문(사진 내려받기 포함) — 시킨 일 세션이 처음에 읽는다
 // 시키기(2026-11-18): 효니가 판에서 체크하면 go(시킨 때 ms), PC 실행기(tools/runner.js)가 가져가면 run {pc, at, sid}.
@@ -53,6 +55,13 @@ function readAll() {
   const out = fbcli(['database:get', BASE]).trim();
   try { return JSON.parse(out) || {}; } catch (e) { console.error('읽은 값이 JSON이 아니에요'); process.exit(1); }
 }
+// 대화 칸에 메시지 더하기(ideas/{id}/th 자리에 update — 있던 메시지는 그대로)
+function patchTh(id, add) {
+  if (!/^[\w-]+$/.test(id)) { console.error('쪽지 id가 이상해요:', id); process.exit(1); }
+  const tmp = path.join(os.tmpdir(), `ideabox-${id}-th.json`);
+  fs.writeFileSync(tmp, JSON.stringify(add));
+  try { fbcli(['database:update', q(`${BASE}/${id}/th`), q(tmp), '--force']); } finally { fs.rmSync(tmp, { force: true }); }
+}
 function patch(id, part) {
   if (!/^[\w-]+$/.test(id)) { console.error('쪽지 id가 이상해요:', id); process.exit(1); }
   const tmp = path.join(os.tmpdir(), `ideabox-${id}.json`);
@@ -80,6 +89,22 @@ function savePics(id, ph) {
   });
 }
 
+// 답하기 스레드(2026-11-18): th = {키: {w 'c' 클로드|'h' 효니, x 글, at 때, q 질문}}. re·rat은 «클로드 마지막 말» 사본.
+// th의 클로드 말 중에 re와 같은 글이 없으면(옛 쪽지, runner.js·글감 ideas.js가 re만 씀) re를 rat 자리에 끼운다 — 앱 js/app.js threadOf와 같은 식.
+function threadOf(x) {
+  const th = x.th && typeof x.th === 'object' ? x.th : {};
+  const list = Object.entries(th).filter(([, m]) => m && typeof m.x === 'string')
+    .map(([k, m]) => ({ k, w: m.w === 'h' ? 'h' : 'c', x: m.x, at: Number(m.at) || 0, q: !!m.q }));
+  if (x.re && !list.some((m) => m.w === 'c' && m.x === x.re)) list.push({ k: '', w: 'c', x: String(x.re), at: Number(x.rat) || Number(x.at) || 0, q: !!x.ask, legacy: true });
+  return list.sort((a, b) => a.at - b.at);
+}
+const msgKey = (at) => 'm' + at.toString(36) + Math.random().toString(36).slice(2, 5);
+function printThread(x, pad) {
+  for (const m of threadOf(x)) {
+    const who = m.w === 'h' ? '💬 효니 답' : m.q ? '❓ 클로드 질문' : '↳ 클로드';
+    console.log(`${pad}${who} (${when(m.at)}): ${String(m.x).replace(/\n/g, `\n${pad}   `)}`);
+  }
+}
 const when = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
 // --force·--no-pics는 어디에 붙여도 선택 표시일 뿐, 답장 글이나 id로 읽지 않는다
 // (2026-11-17: `done <id> --force`가 답장 칸에 «--force»를 써서 원래 답장을 덮음)
@@ -105,7 +130,9 @@ if (cmd === 'seen') {
   console.log(x.t ? String(x.t) : '(글 없이 사진만)');
   if (x.src) console.log(x.a ? `\n✍️ 효니 답(${when(x.aat || x.ed || x.at)}): ${x.a}${x.aw ? ' — 출처 파일에 적혀 있음' : ''}` : '\n(효니 답 없음 — 시켰다면 «답이 없으면» 기본값으로)');
   for (const f of savePics(id, x.ph)) console.log('📷 ' + f);
-  if (x.re) console.log(`\n↳ 앞서 클로드가 단 ${x.ask ? '질문' : '답장'}: ${x.re}`);
+  // 원래 글 아래 대화(클로드 답장·질문, 효니 답)를 때 순서로. 효니 답은 원래 글이 아니라 여기에 있다.
+  if (threadOf(x).length) { console.log('\n— 대화 —'); printThread(x, ''); }
+  if (x.ask) console.log('\n(아직 효니 답을 기다리는 중)');
 } else if (cmd === 'done' || cmd === 'reply' || cmd === 'ask') {
   const id = rest[0];
   const re = (rest[1] || '').trim();
@@ -122,7 +149,16 @@ if (cmd === 'seen') {
   const part = { st: cmd === 'done' ? 'done' : 'seen', ask: cmd === 'ask' ? true : null, go: null, run: null };
   // 시킨 일(go·run)을 하다 물으면, 효니가 답할 때 앱이 다시 시키도록 표시
   part.again = cmd === 'ask' && (data[id].go || data[id].run || data[id].again) ? true : null;
-  if (re) Object.assign(part, { re, rat: Date.now() });
+  if (re) {
+    const now = Date.now();
+    // 대화 칸(th)에는 새 메시지만 «더한다»: ideas/{id}/th 자리에 update하면 다른 칸(그새 온 효니 답)은 그대로 남는다.
+    // 옛 방식 답장(re만 있고 th에 없음)도 같이 옮긴다 — 아래에서 re를 덮어도 대화에 남게(키 m{at}r은 앱과 같음)
+    const add = {};
+    for (const m of threadOf(data[id])) if (m.legacy) add[`m${(m.at || now).toString(36)}r`] = { w: 'c', x: m.x, at: m.at || now, ...(m.q ? { q: true } : {}) };
+    add[msgKey(now)] = { w: 'c', x: re, at: now, ...(cmd === 'ask' ? { q: true } : {}) };
+    patchTh(id, add);
+    Object.assign(part, { re, rat: now });
+  }
   patch(id, part);
   console.log(`${id} → ${part.st}${cmd === 'ask' ? ' ❓답 필요 (질문 달음)' : re ? ' (답장 달음)' : ''}`);
 } else {
@@ -157,14 +193,16 @@ if (cmd === 'seen') {
     const nPh = (Array.isArray(x.ph) ? x.ph : Object.values(x.ph || {})).filter(Boolean).length;
     // 답장(rat) 뒤에 효니가 고친(ed) 새 쪽지 = 효니가 답했거나 덧붙임 → 받아 두기는 seen만(답장으로 덮지 않음)
     const answered = x.st === 'new' && x.re && x.ed && x.rat && x.ed > x.rat;
+    // 앱 «답하기»(스레드)로 효니가 답한 새 쪽지 — 받아 두기는 위와 같이 seen만
+    const replied = x.st === 'new' && x.hat && (!x.rat || x.hat > x.rat);
     const goMark = x.st === 'done' ? '' : x.run && x.run.n === 'wait' ? ` 🤖시킴(${x.run.pc || '?'}에서 할 차례)` : x.run ? ` 🤖하는 중(${x.run.pc || '?'})` : x.go ? ' 🤖시킴' : '';
-    console.log(`[${x.id}] ${x.st}${goMark}${x.hot ? ' 🔥급함' : ''}${x.ask && x.st !== 'done' ? ' ❓답 기다림' : ''}${answered ? ' ✍️ 효니가 답장 뒤 고침' : ''} · ${x.tag || '일반'} · ${when(x.at)}${nPh ? ` · 📷 사진 ${nPh}장` : ''}`);
+    console.log(`[${x.id}] ${x.st}${goMark}${x.hot ? ' 🔥급함' : ''}${x.ask && x.st !== 'done' ? ' ❓답 기다림' : ''}${replied ? ' 💬 효니가 답함' : answered ? ' ✍️ 효니가 답장 뒤 고침' : ''} · ${x.tag || '일반'} · ${when(x.at)}${nPh ? ` · 📷 사진 ${nPh}장` : ''}`);
     console.log('  ' + (x.t ? String(x.t).replace(/\n/g, '\n  ') : '(글 없이 사진만)'));
     if (nPh) {
       if (process.argv.includes('--no-pics')) console.log(`  📷 사진 보기: node tools/inbox.js pics ${x.id}`);
       else for (const f of savePics(x.id, x.ph)) console.log('  📷 ' + f);
     }
-    if (x.re) console.log('  ↳ 클로드 답장: ' + x.re.replace(/\n/g, ' '));
+    printThread(x, '  ');
     console.log('');
   }
   if (!shown.length) console.log('(보여 줄 쪽지 없음)');
