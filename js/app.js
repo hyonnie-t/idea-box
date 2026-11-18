@@ -995,6 +995,8 @@ async function sendReply() {
     if (!msg) { $('#rq-0').focus(); return toast('답을 적어 주세요.'); }
   }
   if (replying !== r) return; // 확인 창을 띄운 사이 창이 닫혔으면 그만
+  // 확인 창을 띄운 사이 끝났거나 새 질문이 왔으면 위와 같이 보내지 않는다
+  if (!ideas[id] || ideas[id].st === 'done' || (lastClaude(ideas[id])?.at || 0) !== r.lcAt) { saveReplyDraft(); $('#reply').close(); return toast('그새 쪽지가 바뀌었어요. 다시 열어 확인해 주세요.'); }
   const now = Date.now();
   const k = r.k;
   const part = { [`th/${k}`]: { w: 'h', x: msg, at: now }, hat: now, st: 'new', ask: null };
