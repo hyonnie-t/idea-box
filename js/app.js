@@ -12,11 +12,13 @@ const TAGS = [
   ['일반', '💭'], ['책장', '📚'], ['시간표', '🗓️'], ['수업', '🏫'], ['학교 일', '📋'], ['글·블로그', '✍️'], ['대학원', '🎓'], ['도구', '🛠️'],
 ];
 const STATES = { new: '새 쪽지', seen: '클로드가 읽음', done: '끝남' };
-const FILTERS = [['open', '안 끝난 것'], ['new', '새 쪽지'], ['seen', '읽음'], ['done', '끝남'], ['all', '전체']];
+const FILTERS = [['open', '안 끝난 것'], ['re', '답장 옴'], ['new', '새 쪽지'], ['seen', '읽음'], ['done', '끝남'], ['all', '전체']];
 
 let store = null;
 let ideas = {};
 let filter = 'open';
+// 찾기(2026-11-18): 이 화면에서만 기억. 쪽지 목록과 할 일 판 둘 다 거른다.
+let query = '';
 let editing = null;
 // 할 일 판: 보는 방법·접은 묶음은 이 기기에 기억, 펼친 줄·끝낸 것 펼침은 이 화면에서만(다시 그려도 유지)
 const VIEW = 'ideabox-view';
@@ -197,6 +199,13 @@ function bind() {
   $('#rep-later').addEventListener('click', () => $('#rep').close());
   for (const d of document.querySelectorAll('dialog')) if (d.id !== 'rep') d.addEventListener('close', () => setTimeout(maybeReport, 300));
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') repLater.clear(); else maybeReport(); });
+  const qIn = $('#q');
+  // 한글은 자모마다 input이 와서, 다시 그리기는 잠깐 멈춘 뒤 한 번만(지우기 단추는 바로)
+  let qTimer = 0;
+  const syncQ = () => { clearTimeout(qTimer); query = qIn.value; $('#q-clear').hidden = !query; render(); };
+  qIn.addEventListener('input', () => { $('#q-clear').hidden = !qIn.value; clearTimeout(qTimer); qTimer = setTimeout(syncQ, 150); });
+  qIn.addEventListener('keydown', (e) => { if (e.key === 'Escape' && qIn.value) { e.preventDefault(); qIn.value = ''; syncQ(); } });
+  $('#q-clear').addEventListener('click', () => { qIn.value = ''; syncQ(); qIn.focus(); });
   $('#filters').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-f]');
     if (!b) return;
@@ -471,24 +480,43 @@ function allItems() {
   const hot = (x) => (x.hot && x.st !== 'done' ? 1 : 0);
   return list.sort((a, b) => hot(b) - hot(a) || b.at - a.at);
 }
-const pass = (x) => filter === 'all' || (filter === 'open' ? x.st !== 'done' : x.st === filter);
+// «답장 옴»(2026-11-18, 효니 말 «쪽지함에서 답장 온 것들을 따로 분류»): 안 끝난 쪽지 중 클로드가 실제로 답한 것.
+// 받아 두기(ideabox-collect)의 «받아 둠 — …» 자동 답장만 있는 쪽지는 넣지 않는다.
+const isReplied = (x) => {
+  if (x.st === 'done' || x.pending || x.src) return false;
+  // 마지막 말이 클로드여야 함 — 효니가 그 뒤에 답했으면 다시 클로드 차례라 «답장 옴»이 아니다
+  const c = threadOf(x).at(-1);
+  return !!c && c.w === 'c' && !/^받아 둠/.test(c.x.trim());
+};
+const passF = (f, x) => (f === 'all' ? true : f === 'open' ? x.st !== 'done' : f === 're' ? isReplied(x) : x.st === f);
+const pass = (x) => passF(filter, x);
+// 찾기: 띄어 쓴 낱말이 모두 들어 있으면 맞음(글·주제·클로드 답장·효니 답·물을 것 출처)
+let wordsCache = ['', []];
+const words = () => (wordsCache[0] === query ? wordsCache[1] : (wordsCache = [query, query.toLowerCase().split(/\s+/).filter(Boolean)])[1]);
+function matchQ(x) {
+  const ws = words();
+  if (!ws.length) return true;
+  const hay = [x.t, x.tag, x.a, x.src?.l, x.src?.d, ...threadOf(x).map((m) => m.x)].filter(Boolean).join('\n').toLowerCase();
+  return ws.every((w) => hay.includes(w));
+}
 
 // 새로 넣은 쪽지의 통통 움직임: 넣은 직후 곧바로 다시 그려져도(올리기·실시간 갱신) 0.8초 동안은 계속 붙인다
 let freshMark = null;
 function render(fresh) {
   if (fresh) freshMark = { id: fresh, t: Date.now() };
   else if (freshMark && Date.now() - freshMark.t < 800) fresh = freshMark.id;
-  const items = allItems();
+  const all = allItems();
+  const items = query.trim() ? all.filter(matchQ) : all;
   const board = view === 'board';
   for (const b of document.querySelectorAll('#views button[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
   $('#filters').hidden = $('#list').hidden = board;
   $('#board').hidden = !board;
-  if (board) { $('#empty').hidden = true; return renderBoard(items, fresh); }
+  if (board) { $('#empty').hidden = true; return renderBoard(items, fresh, all); }
   // «효니에게 물을 것»(src)은 효니 쪽지가 아니라 판 맨 위에만 보인다(쪽지 목록·숫자에 섞지 않음)
   return renderList(items.filter((x) => !x.src), fresh);
 }
 function renderList(items, fresh) {
-  const n = (f) => items.filter((x) => (f === 'all' ? true : f === 'open' ? x.st !== 'done' : x.st === f)).length;
+  const n = (f) => items.filter((x) => passF(f, x)).length;
   $('#filters').innerHTML = FILTERS.map(([f, label]) => `<button type="button" class="fchip" data-f="${f}" aria-pressed="${f === filter}">${label} <b>${n(f)}</b></button>`).join('');
   const shown = items.filter(pass);
   const ol = $('#list');
@@ -496,7 +524,7 @@ function renderList(items, fresh) {
   if (fresh) ol.querySelector(`[data-id="${fresh}"]`)?.classList.add('fresh');
   const empty = $('#empty');
   empty.hidden = shown.length > 0;
-  empty.textContent = items.length ? '여기엔 쪽지가 없어요.' : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
+  empty.textContent = query.trim() ? `«${query.trim()}» 들어간 쪽지가 ${items.length ? '이 칸엔 ' : ''}없어요.` : items.length ? '여기엔 쪽지가 없어요.' : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
   fillThumbs(ol);
   reveal();
 }
@@ -580,7 +608,7 @@ function rego(cur, now) {
 function planGo(x, pc) { const now = Date.now(); return { patch: { go: now, again: null, run: { pc, at: now, n: 'wait' } }, undo: { go: null, again: x.again || null, run: null } }; }
 function planStop(x) { return { patch: { go: null, run: null }, undo: { go: x.go || null, run: x.run || null } }; }
 
-function renderBoard(everything, fresh) {
+function renderBoard(found, fresh, everything = found) {
   // 물을 것(src)은 맨 위 칸에만, 끝난 것은 안 보임(원본 파일이 기록)
   const asks = everything.filter((x) => x.src && x.st !== 'done');
   const items = everything.filter((x) => !x.src);
@@ -593,10 +621,14 @@ function renderBoard(everything, fresh) {
   $('#board-sum').innerHTML = items.length || asks.length
     ? `남은 일 <b>${open.length}</b>${nRep ? ` · <span class="sum-rep">🔔 확인할 것 <b>${nRep}</b></span>` : ''}${nAsk ? ` · <span class="sum-ask">❓ 답 필요 <b>${nAsk}</b></span>` : ''}${nHot ? ` · <span class="sum-hot">🔥 급해요 <b>${nHot}</b></span>` : ''}${nGo ? ` · <span class="sum-go">🤖 시킨 일 <b>${nGo}</b></span>` : ''}<br><span class="sum-help">체크하면 어느 PC에서 할지 물어봐요. 고른 PC에서 클로드가 시작하고, 다 하면 답장이 달려요.</span>`
     : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
+  const searching = !!query.trim();
+  const fAsks = searching ? asks.filter(matchQ) : asks;
+  // 찾은 수는 판에 실제로 보이는 것만(끝난 물을 것은 판에 안 보이므로 뺀다)
+  if (searching) $('#board-sum').innerHTML += `<br><span class="sum-find">🔎 «${esc(query.trim())}» 찾은 것 <b>${found.filter((x) => !x.src).length + fAsks.length}</b></span>`;
   // 묶음: 주제 순서대로, 남은 일이 있는 묶음 먼저. 모르는 주제는 «일반»에.
   const known = new Set(TAGS.map(([t]) => t));
   const groups = TAGS.map(([tag, ico]) => {
-    const all = items.filter((x) => (known.has(x.tag) ? x.tag : '일반') === tag);
+    const all = items.filter((x) => (known.has(x.tag) ? x.tag : '일반') === tag && (!searching || matchQ(x)));
     const rank = (x) => (isAsk(x) ? 8 : 0) + (isRep(x) ? 4 : 0) + (isGo(x) ? 2 : 0) + (x.hot ? 1 : 0);
     const todo = all.filter((x) => x.st !== 'done').sort((a, b) => rank(b) - rank(a) || b.at - a.at);
     const done = all.filter((x) => x.st === 'done').sort((a, b) => (b.rat || b.at) - (a.rat || a.at));
@@ -607,7 +639,7 @@ function renderBoard(everything, fresh) {
   const a = document.activeElement;
   const box = $('#groups');
   const keep = a && box.contains(a) ? { id: a.closest('[data-id]')?.dataset.id, tag: a.closest('.group')?.dataset.tag, act: a.dataset.act } : null;
-  box.innerHTML = asksBlock(asks) + groups.map(group).join('');
+  box.innerHTML = (asksBlock(fAsks) + groups.map((g) => group(g, searching)).join('')) || (searching ? '<p class="empty">찾는 말이 들어간 쪽지가 없어요.</p>' : '');
   if (keep) {
     const sel = keep.id ? `[data-id="${CSS.escape(keep.id)}"] [data-act="${keep.act}"]` : `.group[data-tag="${CSS.escape(keep.tag || '')}"] [data-act="${keep.act}"]`;
     box.querySelector(sel)?.focus({ preventScroll: true });
@@ -622,6 +654,7 @@ function asksBlock(asks) {
   if (!asks.length) return '';
   const rank = (x) => (isGo(x) ? 2 : x.a ? 1 : 0);
   const list = [...asks].sort((a, b) => rank(a) - rank(b) || b.at - a.at);
+  const all3 = asksOpen || !!query.trim();
   const head = list.slice(0, 3);
   const rest = list.slice(3);
   const nA = asks.filter((x) => x.a && !isGo(x)).length;
@@ -630,15 +663,15 @@ function asksBlock(asks) {
     <p class="asks-help">여러 일의 계획에서 모았어요. 답하면 그 계획 파일에 적히고, 체크하면 클로드가 그 답으로 바로 이어서 해요.</p>
     <div class="gbody">
       <ul class="rows">${head.map(row).join('')}</ul>
-      ${rest.length ? `${asksOpen ? `<ul class="rows asks-rest">${rest.map(row).join('')}</ul>` : ''}
-      <button type="button" class="done-toggle" data-act="asksfold" aria-expanded="${asksOpen}">나머지 ${rest.length}개 ${asksOpen ? '접기' : '보기'}</button>` : ''}
+      ${rest.length ? `${all3 ? `<ul class="rows asks-rest">${rest.map(row).join('')}</ul>` : ''}
+      ${query.trim() ? '' : `<button type="button" class="done-toggle" data-act="asksfold" aria-expanded="${asksOpen}">나머지 ${rest.length}개 ${asksOpen ? '접기' : '보기'}</button>`}` : ''}
     </div>
   </section>`;
 }
-function group(g) {
-  const closed = closedGroups.has(g.tag);
+function group(g, searching = false) {
+  const closed = !searching && closedGroups.has(g.tag);
   const gid = 'g-' + TAGS.findIndex(([t]) => t === g.tag);
-  const doneOpen = openDone.has(g.tag);
+  const doneOpen = searching || openDone.has(g.tag);
   return `<section class="group${closed ? ' closed' : ''}" data-tag="${esc(g.tag)}">
     <h3><button type="button" class="ghead" data-act="group" aria-expanded="${!closed}" aria-controls="${gid}">
       <span class="gname">${g.ico} ${esc(g.tag)}</span><span class="gcount">${g.todo.length ? `남은 <b>${g.todo.length}</b>` : '다 끝남'}</span><span class="caret" aria-hidden="true"></span>

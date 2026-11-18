@@ -65,6 +65,13 @@
       <button type="button" class="vbtn" data-view="board" aria-pressed="false">✅ 할 일 판</button>
     </div>
 
+    <div class="find" role="search">
+      <label for="q" class="vh">쪽지 찾기</label>
+      <span class="find-ico" aria-hidden="true">🔎</span>
+      <input type="search" id="q" placeholder="쪽지·답장에서 찾기" autocomplete="off" enterkeyhint="search">
+      <button type="button" class="find-clear" id="q-clear" aria-label="찾는 말 지우기" hidden>✕</button>
+    </div>
+
     <div class="bar" role="group" aria-label="쪽지 거르기" id="filters"></div>
 
     <ol class="list" id="list"></ol>

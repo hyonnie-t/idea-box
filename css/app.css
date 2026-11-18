@@ -139,6 +139,20 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
   border: 0; background: rgba(255, 255, 255, .16); color: #fff; font-size: 1.6rem; cursor: pointer;
 }
 
+/* 찾기(2026-11-18) */
+.find { position: relative; display: flex; align-items: center; margin-top: var(--space-3); }
+.find-ico { position: absolute; left: var(--space-3); font-size: .9rem; pointer-events: none; opacity: .7; }
+.find input {
+  width: 100%; min-height: 40px; padding: 0 var(--space-6) 0 var(--space-6); border-radius: 999px; border: 1px solid var(--line);
+  background: var(--paper); color: var(--ink); font: inherit; font-size: 1rem; transition: border-color .15s ease, box-shadow .15s ease;
+}
+.find input::-webkit-search-cancel-button { display: none; }
+.find input:focus-visible { outline: none; border-color: var(--sky); box-shadow: 0 0 0 3px var(--sky-soft); }
+.find-clear { position: absolute; right: 0; width: 40px; height: 40px; border: 0; border-radius: 999px; background: transparent; color: var(--soft); cursor: pointer; }
+.find-clear[hidden] { display: none; }
+.sum-find { color: var(--soft); }
+.find + .bar { margin-top: var(--space-2); }
+
 /* 거르기 */
 .bar { display: flex; gap: var(--space-2); overflow-x: auto; margin: var(--space-4) 0 var(--space-3); padding-bottom: var(--space-1); scrollbar-width: none; }
 .fchip {
@@ -363,7 +377,7 @@ html:has(dialog[open]) { overflow: hidden; }
   #content:not([hidden]) { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 0 var(--space-5); align-items: start; }
   .compose { grid-column: 1; grid-row: 1 / span 6; position: sticky; top: var(--space-3); }
   .views { grid-column: 2; margin-top: 0; justify-self: start; }
-  .bar { grid-column: 2; }
+  .bar, .find { grid-column: 2; }
   .list, .empty, .board { grid-column: 2; }
 }
 @media (prefers-reduced-motion: reduce) {
