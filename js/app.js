@@ -601,7 +601,7 @@ const isGo = (x) => (!!x.go || isRun(x) || isWait(x)) && x.st !== 'done' && !x.p
 const isRep = (x) => !!x.rep && x.st !== 'done' && !x.pending && !isGo(x);
 // 시킨 일 중에 클로드가 물은 것(again)에 답하면 하던 PC(spc)에서 이어서 하게 다시 시킨다.
 // 하던 PC를 모르면 시키지 않는다 — PC를 안 고른 시키기는 실행기가 받지 않으므로(2026-11-18, 출처: 효니 말 «나한테 안 물어보던데»)
-const PICK_AGAIN = '답을 넣었어요. 이어서 시키려면 체크해서 PC를 골라 주세요';
+const PICK_AGAIN = '답을 넣었어요. 이어서 시키려면 답하기 창의 «보내고 시키기»나 판 체크로 PC를 골라 주세요';
 function rego(cur, now) {
   if (!cur.again) return {};
   return cur.spc ? { go: now, again: null, run: { pc: cur.spc, at: now, n: 'wait' } } : { again: null };
