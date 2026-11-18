@@ -126,7 +126,7 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
 .thumb:active { transform: scale(.95); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb img:not([src]) { visibility: hidden; }
-.card.is-done .thumb { opacity: .7; }
+.trow.is-done .thumb { opacity: .7; }
 .edit-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-2); }
 .edit-row .hot { margin-top: 0; }
 .viewer { border: 0; padding: 0; background: transparent; max-width: 100vw; max-height: 100dvh; width: 100vw; height: 100dvh; margin: 0; }
@@ -162,28 +162,9 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
 .fchip b { font-weight: 700; margin-left: var(--space-1); }
 .fchip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 
-/* 쪽지 카드 */
-.list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
-.card {
-  background: var(--paper); border-radius: var(--radius); padding: var(--space-3); box-shadow: var(--shadow);
-  border: 1px solid var(--line); opacity: 0; transform: translateY(16px);
-  transition: opacity .3s ease, transform .35s var(--bounce);
-}
-.card.show { opacity: 1; transform: none; }
-.card.is-hot { border-color: var(--hot); background: linear-gradient(var(--hot-soft), var(--paper) 48px); }
-.card.is-done .text { color: var(--soft); }
-.card.fresh { animation: pop .5s var(--bounce); }
-.meta { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; font-size: .85rem; color: var(--soft); }
-.tag { background: var(--sky-soft); color: var(--sky-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
-.hotmark { background: var(--hot-soft); color: var(--hot-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
-.meta time { margin-left: auto; }
+/* 쪽지 줄의 글 */
 .text { margin: var(--space-2) 0 0; white-space: pre-wrap; font-size: 1.02rem; }
 .row { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap; }
-.badge { font-size: .8rem; border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; }
-.badge.new { background: var(--accent-soft); color: var(--accent-t); font-weight: 700; }
-.badge.seen { background: var(--sky-soft); color: var(--sky-t); }
-.badge.done { background: var(--mint-soft); color: var(--mint-t); }
-.badge.wait { background: var(--hot-soft); color: var(--hot-t); }
 .acts { margin-left: auto; display: flex; gap: var(--space-1); flex-wrap: wrap; }
 .acts button {
   min-height: 32px; padding: 0 var(--space-2); border: 0; background: transparent; color: var(--soft);
@@ -228,9 +209,7 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
 .rep-re { background: var(--mint-soft); border-radius: 8px; padding: var(--space-2) var(--space-3); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; max-height: 40vh; overflow: auto; }
 .rep-acts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .rep-acts button { min-height: 40px; }
-.repmark { background: var(--sky-soft); color: var(--sky-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
 .tsub.rep { color: var(--sky-t); font-weight: 700; }
-.sum-rep b { color: var(--sky-t); }
 html:has(dialog[open]) { overflow: hidden; }
 
 .toast {
@@ -258,14 +237,7 @@ html:has(dialog[open]) { overflow: hidden; }
   .compose .chip { flex: none; }
   .compose .chip span { white-space: nowrap; }
 }
-/* 보는 방법: 쪽지 | 할 일 판 */
-.views { display: inline-flex; gap: var(--space-1); padding: var(--space-1); margin-top: var(--space-4); border-radius: 999px; background: var(--paper); border: 1px solid var(--line); }
-.vbtn { min-height: 40px; padding: 0 var(--space-3); border: 0; border-radius: 999px; background: transparent; color: var(--soft); cursor: pointer; font-size: .95rem; transition: background .2s, color .2s; }
-.vbtn[aria-pressed="true"] { background: var(--sky-soft); color: var(--sky-t); font-weight: 700; }
-.views + .bar { margin-top: var(--space-3); }
 
-/* «답 필요» 표시 */
-.askmark { background: var(--accent-soft); color: var(--accent-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
 /* 물을 것(src) 답하기 창의 물음 상자·내 답(asks.js 흐름은 그대로) */
 .reply {
   margin-top: var(--space-3); background: var(--mint-soft); border-radius: 4px var(--radius) var(--radius) var(--radius);
@@ -322,11 +294,11 @@ html:has(dialog[open]) { overflow: hidden; }
 .send-pair { display: flex; gap: var(--space-2); margin-left: auto; }
 
 /* 할 일 판 */
-.board { margin-top: var(--space-3); }
-.board-sum { margin: 0 0 var(--space-3); color: var(--soft); font-size: .95rem; }
+.board { margin-top: 0; }
+.board-top { display: flex; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); }
+.board-sum { margin: 0; flex: 1; min-width: 0; color: var(--soft); font-size: .95rem; }
+#fold-all { flex: none; min-height: 32px; font-size: .85rem; }
 .board-sum b { color: var(--ink); }
-.sum-ask b { color: var(--accent-t); }
-.sum-hot b { color: var(--hot-t); }
 .groups { display: grid; gap: var(--space-3); }
 .group { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
 .group h3 { margin: 0; font-size: 1rem; }
@@ -381,35 +353,66 @@ html:has(dialog[open]) { overflow: hidden; }
   .top, main { max-width: 1120px; }
   #content:not([hidden]) { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 0 var(--space-5); align-items: start; }
   .compose { grid-column: 1; grid-row: 1 / span 6; position: sticky; top: var(--space-3); }
-  .views { grid-column: 2; margin-top: 0; justify-self: start; }
+  .turn { grid-column: 2; margin-top: 0; }
   .bar, .find { grid-column: 2; }
-  .list, .empty, .board { grid-column: 2; }
+  .board { grid-column: 2; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
-  .card { opacity: 1; transform: none; }
 }
 
 /* 클로드에게 시키기(2026-11-18) */
 .tcheck.go input { accent-color: var(--sky); }
 .tsub.go { color: var(--sky-t); font-weight: 700; }
 .trow.is-go { background: linear-gradient(90deg, var(--sky-soft), transparent 40%); }
-.gomark { background: var(--sky-soft); color: var(--sky-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
-.sum-go b { color: var(--sky-t); }
-.sum-help { display: inline-block; margin-top: var(--space-1); font-size: .85rem; }
+.sum-help { font-size: .85rem; }
 
 /* 효니에게 물을 것(2026-11-18): 판 맨 위, 답 필요와 같은 귤색 */
 .group.asks { border-color: var(--accent); }
-.asks-head { display: flex; align-items: center; gap: var(--space-2); min-height: 48px; padding: 0 var(--space-3); background: var(--accent-soft); }
-.asks-head .gname { color: var(--accent-t); }
-.asks-head .gcount b { color: var(--accent-t); }
-.asks-help { margin: 0; padding: var(--space-2) var(--space-3); font-size: .85rem; color: var(--soft); background: var(--accent-soft); }
-.group.asks .gbody { border-top-color: var(--accent-soft); }
-.group.asks .done-toggle { margin-bottom: var(--space-1); }
+.group.asks .ghead { background: var(--accent-soft); }
+.group.asks .gname, .group.asks .gcount b { color: var(--accent-t); }
 .tsub.src { color: var(--soft); }
 .src-info { margin: 0; font-size: .85rem; color: var(--accent-t); font-weight: 700; }
 .src-path { display: block; font-weight: 400; color: var(--soft); word-break: break-all; }
 .src-def { margin: var(--space-2) 0 0; font-size: .9rem; }
 .reply.mine { background: var(--sky-soft); }
 .reply.mine .who { color: var(--sky-t); }
-.asks-rest { border-top: 1px dashed var(--line); }
+
+/* 한 화면(2026-11-18): 쓰기 칸 접기 · 내 차례 띠 · 집·이사 머리 */
+/* 쓰기 칸은 폰·태블릿 세로에서 한 줄로 접혀 있다가 누르면 펴짐(PC 두 단에선 늘 펴짐) */
+@media (max-width: 1023px) {
+  .compose.folded { padding: var(--space-2) var(--space-3); }
+  .compose.folded textarea { min-height: 40px; height: 40px; line-height: 40px; background: none; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: text; }
+  .compose.folded .chips, .compose.folded .compose-foot, .compose.folded .pic-strip { display: none; }
+  .compose:not(.folded) { animation: fade .2s ease; }
+}
+@media (min-width: 1024px) { #compose-fold { display: none; } }
+#compose-fold { min-height: 40px; }
+
+/* 내 차례 띠: 귤색 테두리 카드, 줄마다 누르면 답하기 창 */
+.turn { margin-top: var(--space-3); background: var(--paper); border: 1px solid var(--accent); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--space-2) 0; animation: rise .3s var(--bounce); }
+.turn-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); margin: 0; padding: 0 var(--space-3) var(--space-1); font-size: 1rem; }
+.turn-head b { color: var(--accent-t); }
+.turn-help { font-size: .8rem; font-weight: 400; color: var(--soft); }
+.turn-list { list-style: none; margin: 0; padding: 0; }
+.turn-list li + li { border-top: 1px dashed var(--line); }
+.turn-item { width: 100%; min-height: 48px; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 0; background: transparent; text-align: left; cursor: pointer; transition: background .15s; }
+.turn-item:hover { background: var(--accent-soft); }
+.turn-item:active .turn-go { transform: scale(.94); }
+.turn-ico { flex: none; width: 24px; text-align: center; }
+.turn-txt { flex: 1; min-width: 0; display: grid; gap: var(--space-1); }
+.turn-t, .turn-s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-s { font-size: .85rem; color: var(--mint-t); }
+.turn-item.ask .turn-s { color: var(--accent-t); font-weight: 700; }
+.turn-item.rep .turn-s { color: var(--sky-t); font-weight: 700; }
+.turn-go { flex: none; font-size: .85rem; color: var(--accent-t); border: 1px solid var(--accent); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; transition: transform .15s var(--bounce); }
+.turn-more { margin-bottom: var(--space-1); }
+
+/* 집·이사 묶음: 맨 위, 만기 D-day */
+.group.house { border-color: var(--mint); }
+.group.house .ghead { background: var(--mint-soft); }
+.dday { flex: none; font-size: .8rem; font-weight: 700; color: var(--mint-t); background: var(--paper); border: 1px solid var(--mint); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; }
+.ghelp { margin: 0; padding: var(--space-2) var(--space-3); font-size: .85rem; color: var(--soft); }
+.ghelp a { color: var(--sky-t); font-weight: 700; }
+.group .gbody > .ghelp + .rows { border-top: 1px dashed var(--line); }
+@media (min-width: 1024px) { .turn { margin-top: 0; } }

@@ -45,9 +45,9 @@
   </section>
 
   <div id="content" hidden>
-    <form class="compose" id="compose" autocomplete="off">
+    <form class="compose folded" id="compose" autocomplete="off">
       <label class="vh" for="t">클로드에게 남길 생각</label>
-      <textarea id="t" name="t" rows="4" placeholder="떠오른 생각을 그대로 적어 두세요. 다음 세션에서 클로드가 읽어요." maxlength="4000"></textarea>
+      <textarea id="t" name="t" rows="1" placeholder="💌 떠오른 생각을 적어 두세요" maxlength="4000"></textarea>
       <div class="pic-strip" id="pics" hidden aria-label="붙인 사진"></div>
       <fieldset class="chips" id="tags">
         <legend>어느 일이에요?</legend><div class="chip-row"></div>
@@ -56,14 +56,12 @@
         <label class="pic-add" id="pic-add"><input type="file" id="pic-in" accept="image/*" multiple class="vh"><span>📷 사진</span></label>
         <label class="hot"><input type="checkbox" id="hot"> <span>🔥 급해요</span></label>
         <span class="draft" id="draft" aria-live="polite"></span>
+        <button type="button" class="text-btn" id="compose-fold">접기</button>
         <button type="submit" class="primary" id="send">쪽지 넣기</button>
       </div>
     </form>
 
-    <div class="views" role="group" aria-label="보는 방법" id="views">
-      <button type="button" class="vbtn" data-view="list" aria-pressed="true">💌 쪽지</button>
-      <button type="button" class="vbtn" data-view="board" aria-pressed="false">✅ 할 일 판</button>
-    </div>
+    <section class="turn" id="turn" hidden aria-label="내 차례"></section>
 
     <div class="find" role="search">
       <label for="q" class="vh">쪽지 찾기</label>
@@ -74,11 +72,8 @@
 
     <div class="bar" role="group" aria-label="쪽지 거르기" id="filters"></div>
 
-    <ol class="list" id="list"></ol>
-    <p class="empty" id="empty" hidden></p>
-
-    <section class="board" id="board" hidden aria-label="할 일 판">
-      <p class="board-sum" id="board-sum"></p>
+    <section class="board" id="board" aria-label="주제별 쪽지">
+      <div class="board-top"><p class="board-sum" id="board-sum"></p><button type="button" class="text-btn" id="fold-all" aria-pressed="false" hidden>모두 접기</button></div>
       <div class="groups" id="groups"></div>
     </section>
   </div>
