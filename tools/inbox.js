@@ -14,6 +14,7 @@
 //   node tools/inbox.js pics <id>                    그 쪽지 사진을 내려받아 파일 경로 출력(Read로 열어 보기)
 //   node tools/inbox.js show <id>                    쪽지 하나 전문(사진 내려받기 포함) — 시킨 일 세션이 처음에 읽는다
 // 시키기(2026-11-18): 효니가 판에서 체크하면 go(시킨 때 ms), PC 실행기(tools/runner.js)가 가져가면 run {pc, at, sid}.
+//   효니가 체크할 때 고른 PC는 run {pc, at, n:'wait'}로 먼저 적히고(2026-11-18 PC 고르기), 그 PC 실행기가 가져가면 n이 실행기 표로 바뀐다.
 //   done/reply/ask는 go·run을 지운다. 시킨 일에서 ask하면 again=true → 효니가 «답하기»로 답하면 앱이 go를 다시 켜 이어서 한다.
 // 사진이 있는 쪽지는 목록을 볼 때 사진을 임시 폴더(%TEMP%\ideabox-pics)에 내려받아 경로를 같이 보여 준다(--no-pics면 안 받음).
 // 사진 자료: users/{uid}/ideaPics/{쪽지id}/{사진키} = { s 작은 그림, b 큰 그림 } (JPEG data URL), 쪽지의 ph = [사진키…]
@@ -156,7 +157,7 @@ if (cmd === 'seen') {
     const nPh = (Array.isArray(x.ph) ? x.ph : Object.values(x.ph || {})).filter(Boolean).length;
     // 답장(rat) 뒤에 효니가 고친(ed) 새 쪽지 = 효니가 답했거나 덧붙임 → 받아 두기는 seen만(답장으로 덮지 않음)
     const answered = x.st === 'new' && x.re && x.ed && x.rat && x.ed > x.rat;
-    const goMark = x.st === 'done' ? '' : x.run ? ` 🤖하는 중(${x.run.pc || '?'})` : x.go ? ' 🤖시킴' : '';
+    const goMark = x.st === 'done' ? '' : x.run && x.run.n === 'wait' ? ` 🤖시킴(${x.run.pc || '?'}에서 할 차례)` : x.run ? ` 🤖하는 중(${x.run.pc || '?'})` : x.go ? ' 🤖시킴' : '';
     console.log(`[${x.id}] ${x.st}${goMark}${x.hot ? ' 🔥급함' : ''}${x.ask && x.st !== 'done' ? ' ❓답 기다림' : ''}${answered ? ' ✍️ 효니가 답장 뒤 고침' : ''} · ${x.tag || '일반'} · ${when(x.at)}${nPh ? ` · 📷 사진 ${nPh}장` : ''}`);
     console.log('  ' + (x.t ? String(x.t).replace(/\n/g, '\n  ') : '(글 없이 사진만)'));
     if (nPh) {
