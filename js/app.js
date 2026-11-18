@@ -217,6 +217,7 @@ function bind() {
   $('#edit-t').addEventListener('input', (e) => grow(e.target));
   // 답하기 창(스레드)
   $('#reply-form').addEventListener('submit', (e) => { e.preventDefault(); sendReply(); });
+  $('#reply-go').addEventListener('click', () => sendReply(true));
   $('#reply-cancel').addEventListener('click', () => $('#reply').close());
   $('#reply-edit').addEventListener('click', () => {
     const id = replying?.id;
@@ -1051,7 +1052,13 @@ function openReply(id) {
   } else {
     box.innerHTML = `<label class="vh" for="rq-0">답</label><textarea id="rq-0" rows="3" maxlength="4000" placeholder="답을 적어 주세요">${esc(draft.text?.[0] || '')}</textarea>`;
   }
-  $('#reply-help').textContent = `보내면 ${x.again && x.spc ? `클로드가 ${x.spc}에서 바로 이어서 해요` : x.again ? '답이 저장돼요. 이어서 시키려면 판에서 체크해 PC를 골라 주세요' : '클로드가 다음에 읽어요'}. 원래 쪽지 글은 그대로예요.`;
+  // «보내고 시키기»(2026-11-18, 출처: 효니 말 «답장이랑 일 시키는 거 분리시킬까» → 단추 2개, 보내기가 기본):
+  // 이미 시킨 일(isGo)이거나 보내기만으로 하던 PC가 이어서 하는 경우(again+spc)엔 숨김
+  const autoGo = !!(x.again && x.spc);
+  $('#reply-go').hidden = autoGo || isGo({ ...x, id });
+  $('#reply-help').textContent = autoGo ? `보내면 클로드가 ${x.spc}에서 바로 이어서 해요. 원래 쪽지 글은 그대로예요.`
+    : isGo({ ...x, id }) ? '보내면 답이 저장돼요. 이미 시킨 일이라 클로드가 할 때 같이 읽어요.'
+    : '«보내기»는 답만 저장해요(클로드가 다음에 읽어요). 바로 일을 시키려면 «보내고 시키기»를 눌러 PC를 골라 주세요.';
   $('#reply').showModal();
   for (const t of box.querySelectorAll('textarea')) grow(t);
   // 대화 맨 아래(지금 질문)가 보이게
@@ -1069,9 +1076,11 @@ function saveReplyDraft() {
   const d = readReply();
   setReplyDraft(replying.id, d.text.some(Boolean) || d.pick.some(Boolean) ? { ...d, for: replying.lcAt } : null);
 }
-async function sendReply() {
+// withGo: «보내고 시키기» — 답을 다 쓴 뒤 PC를 고르게 하고, 답과 시키기(planGo)를 한 번에 저장한다
+async function sendReply(withGo = false) {
   // 보내는 중에 또 누르면(Ctrl+Enter 두 번 등) 무시 — 같은 답이 두 번 쌓이지 않게
   if (!replying || replying.sending) return;
+  if (withGo && $('#reply-go').hidden) withGo = false;
   const r = replying;
   const { id, qs } = r;
   const cur = ideas[id];
@@ -1094,15 +1103,26 @@ async function sendReply() {
   if (replying !== r) return; // 확인 창을 띄운 사이 창이 닫혔으면 그만
   // 확인 창을 띄운 사이 끝났거나 새 질문이 왔으면 위와 같이 보내지 않는다
   if (!ideas[id] || ideas[id].st === 'done' || (lastClaude(ideas[id])?.at || 0) !== r.lcAt) { saveReplyDraft(); $('#reply').close(); return toast('그새 쪽지가 바뀌었어요. 다시 열어 확인해 주세요.'); }
+  let pc = '';
+  if (withGo) {
+    // PC 창을 띄운 사이 또 누르지 못하게 막아 둔다. 그만두면 답하기 창은 그대로(쓴 답 남음)
+    r.sending = true;
+    try { pc = await pickPc(); } finally { r.sending = false; }
+    if (!pc || replying !== r) return;
+    const now2 = ideas[id];
+    if (!now2 || now2.st === 'done' || isGo({ ...now2, id }) || (lastClaude(now2)?.at || 0) !== r.lcAt) { saveReplyDraft(); $('#reply').close(); return toast('그새 쪽지가 바뀌었어요. 다시 열어 확인해 주세요.'); }
+  }
   const now = Date.now();
   const k = r.k;
   const part = { [`th/${k}`]: { w: 'h', x: msg, at: now }, hat: now, st: 'new', ask: null, rep: null };
   // 옛 방식 답장(re만 있고 th에 없음)은 같이 th로 옮겨 둔다 — 다음 답장이 re를 덮어도 대화에 남게
   for (const m of threadOf(cur)) if (m.legacy) part[`th/m${(m.at || now).toString(36)}r`] = { w: 'c', x: m.x, at: m.at || now, ...(m.q ? { q: true } : {}) };
   // 시킨 일 중에 물은 것(again)에 답하면 다시 시켜 이어서 하게 한다
-  Object.assign(part, rego(cur, now));
-  const btn = $('#reply-send');
-  btn.disabled = true;
+  // 보내고 시키기면 고른 PC로 시킨다(판 체크와 같은 planGo), 아니면 시킨 일 중 물은 것만 다시 시킨다
+  const go = pc ? planGo(ideas[id], pc) : null;
+  Object.assign(part, go ? go.patch : rego(cur, now));
+  const btns = [$('#reply-send'), $('#reply-go')];
+  for (const b of btns) b.disabled = true;
   r.sending = true;
   try {
     await withTimeout(store.patch(id, part), 8000);
@@ -1111,10 +1131,14 @@ async function sendReply() {
     freshMsg = k;
     setTimeout(() => { if (freshMsg === k) freshMsg = null; }, 1500);
     $('#reply').close();
-    toast(part.go ? '답을 보냈어요. 클로드가 이어서 해요' : cur.again ? PICK_AGAIN : '답을 보냈어요. 클로드가 다음에 읽어요');
     render();
+    if (go) {
+      ls.set(LASTPC, pc);
+      // 되돌리기는 시키기만 취소한다(보낸 답은 남음)
+      showUndo(`답을 보내고 ${pc}에서 하라고 시켰어요`, id, go.undo);
+    } else toast(part.go ? '답을 보냈어요. 클로드가 이어서 해요' : cur.again ? PICK_AGAIN : '답을 보냈어요. 클로드가 다음에 읽어요');
   } catch (e) { toast('보내지 못했어요. 다시 눌러도 한 번만 들어가요.'); }
-  finally { btn.disabled = false; r.sending = false; }
+  finally { for (const b of btns) b.disabled = false; r.sending = false; }
 }
 
 // 앱 안 확인 창(브라우저 confirm 대신)
