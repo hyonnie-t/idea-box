@@ -267,7 +267,8 @@ async function step() {
     if (!back.go) { log(`${id} 그새 효니가 체크를 풂`); patch(id, { run: null }); return; }
   } catch (e) { myN = ''; log(`${id} 가져가기 실패: ${e.message.slice(0, 160)}`); return; } // myN을 비워야 쓰다 만 내 run을 다음 tick이 내려놓는다
   // 물을 것이면 효니 답을 출처 파일에 먼저 적어 둔다(10분 맞추기를 기다리지 않게)
-  if (x.src && x.a) { try { log(`${id} 답 적기: ${require('./asks.js').writeOne(id, x)}`); } catch (e) { log(`${id} 답 적기 실패: ${String(e.message || e).slice(0, 160)}`); } }  log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
+  if (x.src && x.a) { try { log(`${id} 답 적기: ${require('./asks.js').writeOne(id, x)}`); } catch (e) { log(`${id} 답 적기 실패: ${String(e.message || e).slice(0, 160)}`); } }
+  log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
   const args = ['-p', prompt(id, resume, x), '--permission-mode', 'auto', '--output-format', 'json',
     '-n', `💌 ${firstLine(x.t).slice(0, 24) || '쪽지 ' + id}`, ...(resume ? ['--resume', sid] : ['--session-id', sid])];
   const child = spawn('claude', args, { cwd: ROOT, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
