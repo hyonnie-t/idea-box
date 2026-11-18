@@ -317,3 +317,19 @@ html:has(dialog[open]) { overflow: hidden; }
 .gomark { background: var(--sky-soft); color: var(--sky-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
 .sum-go b { color: var(--sky-t); }
 .sum-help { display: inline-block; margin-top: var(--space-1); font-size: .85rem; }
+
+/* 효니에게 물을 것(2026-11-18): 판 맨 위, 답 필요와 같은 귤색 */
+.group.asks { border-color: var(--accent); }
+.asks-head { display: flex; align-items: center; gap: var(--space-2); min-height: 48px; padding: 0 var(--space-3); background: var(--accent-soft); }
+.asks-head .gname { color: var(--accent-t); }
+.asks-head .gcount b { color: var(--accent-t); }
+.asks-help { margin: 0; padding: var(--space-2) var(--space-3); font-size: .85rem; color: var(--soft); background: var(--accent-soft); }
+.group.asks .gbody { border-top-color: var(--accent-soft); }
+.group.asks .done-toggle { margin-bottom: var(--space-1); }
+.tsub.src { color: var(--soft); }
+.src-info { margin: 0; font-size: .85rem; color: var(--accent-t); font-weight: 700; }
+.src-path { display: block; font-weight: 400; color: var(--soft); word-break: break-all; }
+.src-def { margin: var(--space-2) 0 0; font-size: .9rem; }
+.reply.mine { background: var(--sky-soft); }
+.reply.mine .who { color: var(--sky-t); }
+.asks-rest { border-top: 1px dashed var(--line); }

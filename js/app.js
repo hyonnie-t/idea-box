@@ -57,6 +57,14 @@ function demoStore() {
     d7: { t: '블로그 글감 폴더 정리해 줘', at: now - 3600e3 * 2, tag: '글·블로그', st: 'seen', go: now - 60e3 },
     d8: { t: '책장 앱 검색창 글씨 크기 키워 줘', at: now - 3600e3 * 3, tag: '책장', st: 'seen', go: now - 600e3, run: { pc: 'CHAN', at: now - 300e3 } },
     d6: { t: '쪽지함 도구 정리', at: now - 86400e3 * 6, tag: '도구', st: 'done', re: '정리했어요.', rat: now - 86400e3 * 5 },
+    // «효니에게 물을 것»(src, tools/asks.js가 계획·작업 목록에서 올림) — 판 맨 위 칸
+    qa1: { t: '책장 실물 책등을 기본 보기로 할지', at: now - 3600e3, tag: '도구', st: 'seen', ask: true, src: { f: '웹앱/bookshelf/TODO.md', l: 'bookshelf 작업 목록', d: '실물 책등이 기본, 색 에디션 창에서 바꿀 수 있음' } },
+    qa2: { t: '홈페이지 방명록(댓글)을 넣을지', at: now - 3600e3 * 2, tag: '도구', st: 'seen', ask: true, src: { f: '클로드작업/산출물/도구설정/2026-11-18_대시보드재설계/2026-11-18_대시보드재설계_계획-인수인계.md', l: '대시보드재설계 계획', d: '넣지 않는다' } },
+    qa3: { t: '처인성 장면(멀리 작은 실루엣)을 넣을지', at: now - 3600e3 * 3, tag: '도구', st: 'seen', ask: true, src: { f: '웹앱/survive-eras/TODO.md', l: 'survive-eras 작업 목록', d: '뺌 — 강화도 한 가지 생각만' } },
+    qa4: { t: '화면 비율 1:1 vs 세로 9:16', at: now - 3600e3 * 4, tag: '도구', st: 'seen', a: '세로 9:16으로 해 줘', aat: now - 1800e3, aw: now - 1500e3, src: { f: '웹앱/survive-eras/TODO.md', l: 'survive-eras 작업 목록', d: '1:1' } },
+    qa5: { t: '제호 «효니실록» 이름을 그대로 둘지', at: now - 3600e3 * 5, tag: '도구', st: 'seen', ask: true, go: now - 60e3, src: { f: '클로드작업/산출물/개인생활/2026-11-18_효니문서/2026-11-18_효니문서_계획-인수인계.md', l: '효니문서 계획', d: '제호는 그대로, 첫 화면만 인물 문서로' } },
+    qa6: { t: '노트마다 검색어를 처음 정할 때 몇 개 노트부터 할지', at: now - 3600e3 * 6, tag: '도구', st: 'seen', ask: true, src: { f: '웹앱/geulgam/TODO.md', l: 'geulgam 작업 목록', d: '글감·초안 칸에 있는 노트만' } },
+    qa9: { t: '이미 정해진 물음(끝남 — 판에 안 보임)', at: now - 86400e3, tag: '도구', st: 'done', src: { f: '웹앱/idea-box/TODO.md', l: 'idea-box 작업 목록', gone: true } },
   };
   // 데모 사진 한 장(그려서 만든 그림)
   const c = document.createElement('canvas'); c.width = 640; c.height = 480;
@@ -194,6 +202,7 @@ function bind() {
   const onPaste = (which) => (e) => {
     const files = [...(e.clipboardData?.files || [])].filter((f) => /^image\//.test(f.type));
     if (!files.length) return;
+    if (which === 'edit' && editSrc) { e.preventDefault(); return toast('물음의 답에는 사진을 붙일 수 없어요. 글로 적어 주세요.'); }
     e.preventDefault();
     addPics(files, which);
   };
@@ -434,6 +443,10 @@ function render(fresh) {
   $('#filters').hidden = $('#list').hidden = board;
   $('#board').hidden = !board;
   if (board) { $('#empty').hidden = true; return renderBoard(items, fresh); }
+  // «효니에게 물을 것»(src)은 효니 쪽지가 아니라 판 맨 위에만 보인다(쪽지 목록·숫자에 섞지 않음)
+  return renderList(items.filter((x) => !x.src), fresh);
+}
+function renderList(items, fresh) {
   const n = (f) => items.filter((x) => (f === 'all' ? true : f === 'open' ? x.st !== 'done' : x.st === f)).length;
   $('#filters').innerHTML = FILTERS.map(([f, label]) => `<button type="button" class="fchip" data-f="${f}" aria-pressed="${f === filter}">${label} <b>${n(f)}</b></button>`).join('');
   const shown = items.filter(pass);
@@ -466,12 +479,15 @@ const isGo = (x) => (!!x.go || isRun(x)) && x.st !== 'done' && !x.pending;
 function planGo(x) { return { patch: { go: Date.now(), again: null }, undo: { go: null, again: x.again || null } }; }
 function planStop(x) { return { patch: { go: null, run: null }, undo: { go: x.go || null, run: x.run || null } }; }
 
-function renderBoard(items, fresh) {
+function renderBoard(everything, fresh) {
+  // 물을 것(src)은 맨 위 칸에만, 끝난 것은 안 보임(원본 파일이 기록)
+  const asks = everything.filter((x) => x.src && x.st !== 'done');
+  const items = everything.filter((x) => !x.src);
   const open = items.filter((x) => x.st !== 'done');
-  const nAsk = open.filter(isAsk).length;
+  const nAsk = open.filter(isAsk).length + asks.filter(isAsk).length;
   const nHot = open.filter((x) => x.hot).length;
-  const nGo = open.filter(isGo).length;
-  $('#board-sum').innerHTML = items.length
+  const nGo = open.filter(isGo).length + asks.filter(isGo).length;
+  $('#board-sum').innerHTML = items.length || asks.length
     ? `남은 일 <b>${open.length}</b>${nAsk ? ` · <span class="sum-ask">❓ 답 필요 <b>${nAsk}</b></span>` : ''}${nHot ? ` · <span class="sum-hot">🔥 급해요 <b>${nHot}</b></span>` : ''}${nGo ? ` · <span class="sum-go">🤖 시킨 일 <b>${nGo}</b></span>` : ''}<br><span class="sum-help">체크하면 클로드가 바로 시작해요(PC가 켜져 있을 때). 다 하면 답장이 달려요.</span>`
     : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
   // 묶음: 주제 순서대로, 남은 일이 있는 묶음 먼저. 모르는 주제는 «일반»에.
@@ -488,13 +504,33 @@ function renderBoard(items, fresh) {
   const a = document.activeElement;
   const box = $('#groups');
   const keep = a && box.contains(a) ? { id: a.closest('[data-id]')?.dataset.id, tag: a.closest('.group')?.dataset.tag, act: a.dataset.act } : null;
-  box.innerHTML = groups.map(group).join('');
+  box.innerHTML = asksBlock(asks) + groups.map(group).join('');
   if (keep) {
     const sel = keep.id ? `[data-id="${CSS.escape(keep.id)}"] [data-act="${keep.act}"]` : `.group[data-tag="${CSS.escape(keep.tag || '')}"] [data-act="${keep.act}"]`;
     box.querySelector(sel)?.focus({ preventScroll: true });
   }
   if (fresh) box.querySelector(`[data-id="${CSS.escape(fresh)}"]`)?.classList.add('fresh');
   fillThumbs($('#groups'));
+}
+// «❓ 효니에게 물을 것»(2026-11-18): 여러 일의 계획·작업 목록에서 모은 물음. 건수와 앞의 3개만, 나머지는 접힘.
+// 순서: 아직 답 안 한 것 → 답한 것 → 시킨 것, 같은 칸 안에선 최근 것 먼저. 줄은 쪽지 줄(row)과 같은 체크(=시키기)·펼치기·답하기를 쓴다.
+let asksOpen = false;
+function asksBlock(asks) {
+  if (!asks.length) return '';
+  const rank = (x) => (isGo(x) ? 2 : x.a ? 1 : 0);
+  const list = [...asks].sort((a, b) => rank(a) - rank(b) || b.at - a.at);
+  const head = list.slice(0, 3);
+  const rest = list.slice(3);
+  const nA = asks.filter((x) => x.a && !isGo(x)).length;
+  return `<section class="group asks" data-tag="❓" aria-labelledby="asks-h">
+    <h3 class="asks-head" id="asks-h"><span class="gname">❓ 효니에게 물을 것</span><span class="gcount"><b>${asks.length}</b>건${nA ? ` · 답한 것 ${nA}` : ''}</span></h3>
+    <p class="asks-help">여러 일의 계획에서 모았어요. 답하면 그 계획 파일에 적히고, 체크하면 클로드가 그 답으로 바로 이어서 해요.</p>
+    <div class="gbody">
+      <ul class="rows">${head.map(row).join('')}</ul>
+      ${rest.length ? `${asksOpen ? `<ul class="rows asks-rest">${rest.map(row).join('')}</ul>` : ''}
+      <button type="button" class="done-toggle" data-act="asksfold" aria-expanded="${asksOpen}">나머지 ${rest.length}개 ${asksOpen ? '접기' : '보기'}</button>` : ''}
+    </div>
+  </section>`;
 }
 function group(g) {
   const closed = closedGroups.has(g.tag);
@@ -524,15 +560,23 @@ function row(x) {
     : stale ? '<span class="tsub wait">⚠️ 멈춘 것 같아요 — 체크를 풀고 다시 체크해 주세요</span>'
     : running ? `<span class="tsub go">⏳ 클로드가 하는 중 · ${esc(x.run.pc || '')}</span>`
     : go ? '<span class="tsub go">🤖 시켰어요 · 곧 시작해요</span>'
+    // 물을 것: 출처와 «답이 없으면», 답했으면 내 답(클로드가 덧붙여 물었으면 그 물음)
+    : x.src && !(ask && x.re) ? (x.a ? `<span class="tsub">✍️ 내 답: ${esc(firstLine(x.a))}</span>`
+      : `<span class="tsub src">📌 ${esc(x.src.l || '')}${x.src.d ? ` · 답이 없으면 ${esc(x.src.d)}` : ''}</span>`)
     : x.re ? `<span class="tsub${ask ? ' ask' : ''}">${ask ? '❓ ' : '클로드: '}${esc(firstLine(x.re))}</span>` : '';
   const marks = `${x.hot && !done ? '<span class="tmark hot" title="급해요">🔥</span>' : ''}${ph.length ? '<span class="tmark" title="사진">📷</span>' : ''}`;
   // 펼치면 제목 줄이 첫 줄 전체를 보여 주므로, 글은 그 다음 줄부터만
   const rest = String(x.t || '').replace(/^\s*[^\n]*\n?/, '').replace(/^\s+/, '');
+  const src = x.src ? `<p class="src-info">📌 ${esc(x.src.l || '')} <span class="src-path">${esc(x.src.f || '')}</span></p>
+      ${x.src.d ? `<p class="src-def">답이 없으면: ${esc(x.src.d)}</p>` : ''}
+      ${x.a ? `<div class="reply mine"><span class="who">✍️ 내 답</span><p>${esc(x.a)}</p><time>${when(x.aat || x.at)}${x.aw ? ' · 계획 파일에 적음' : ''}</time></div>` : ''}` : '';
+  const editLabel = x.src ? (x.a && !ask ? '답 고치기' : '답하기') : ask ? '답하기' : '고치기';
   const more = expanded ? `<div class="tmore">
       ${rest ? `<p class="text">${esc(rest)}</p>` : ''}
+      ${src}
       ${ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : ''}
       ${x.re ? `<div class="reply${ask ? ' is-ask' : ''}"><span class="who">${ask ? '❓ 클로드가 물어요' : '클로드'}</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : ''}
-      <div class="row"><span class="tmeta">${when(x.at)}${x.ed ? ' · 고침' : ''}</span><span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${ask ? '답하기' : '고치기'}</button>${done ? '' : '<button type="button" data-act="done">끝남으로</button>'}`}<button type="button" class="del" data-act="del">지우기</button></span></div>
+      <div class="row"><span class="tmeta">${when(x.at)}${x.ed ? ' · 고침' : ''}</span><span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${editLabel}</button>${done ? '' : '<button type="button" data-act="done">끝남으로</button>'}`}${x.src ? '' : '<button type="button" class="del" data-act="del">지우기</button>'}</span></div>
     </div>` : '';
   return `<li class="trow${done ? ' is-done' : ''}${go ? ' is-go' : ''}${ask ? ' is-ask' : ''}${x.hot && !done ? ' is-hot' : ''}${expanded ? ' open' : ''}" data-id="${esc(x.id)}">
     ${done ? `<label class="tcheck"><input type="checkbox" data-act="check" checked><span class="vh">끝남 — 풀면 다시 열어요: ${esc(title)}</span></label>`
@@ -557,6 +601,7 @@ function onBoardClick(e) {
     openDone.has(tag) ? openDone.delete(tag) : openDone.add(tag);
     return render();
   }
+  if (act === 'asksfold') { asksOpen = !asksOpen; return render(); }
   if (act === 'expand') {
     const id = b.closest('[data-id]').dataset.id;
     openRows.has(id) ? openRows.delete(id) : openRows.add(id);
@@ -651,8 +696,53 @@ async function run(p, msg) {
   try { await withTimeout(p, 8000); toast(msg); } catch (e) { toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
 }
 
-function openEdit(id, x) {
+// 물을 것(src)의 답하기: 물음(t)은 그대로 두고 빈 칸에 답만 적어 a·aat에 저장. 주제·급해요·사진 칸은 숨김.
+let editSrc = false;
+function setEditMode(src) {
+  editSrc = src;
+  $('#edit-tags').hidden = src;
+  $('#edit-form .edit-row').hidden = src;
+  $('#edit-t').placeholder = src ? '답을 적어 주세요' : '';
+  $('#edit-ask .ask-who').textContent = '❓ 클로드가 물어요';
+}
+function openSrcAnswer(id, x) {
   editing = id;
+  setEditMode(true);
+  $('#edit-t').value = x.a || '';
+  $('#edit-ask').hidden = false;
+  $('#edit-ask .ask-who').textContent = `📌 ${x.src.l || '계획'}에서 물어요`;
+  $('#edit-ask-q').textContent = (x.t || '') + (x.src.d ? `\n\n답이 없으면: ${x.src.d}` : '') + (x.ask && x.re ? `\n\n클로드가 덧붙여 물어요: ${x.re}` : '');
+  $('#edit-title').textContent = x.a && !x.ask ? '답 고치기' : '물음에 답하기';
+  $('#edit-ask .ask-help').textContent = x.again ? '저장하면 계획 파일에 적히고 클로드가 바로 이어서 해요.'
+    : '저장하면 그 계획 파일에 날짜와 함께 적혀요. 클로드가 바로 하게 하려면 판에서 체크해 주세요.';
+  editGen++;
+  editPics = [];
+  renderEditPics();
+  $('#edit').showModal();
+  grow($('#edit-t'));
+}
+async function saveAnswer() {
+  const a = $('#edit-t').value.trim();
+  const id = editing;
+  const cur = ideas[id];
+  if (!cur) { $('#edit').close(); editing = null; return toast('다른 곳에서 지워진 물음이에요.'); }
+  if (!a) { $('#edit-t').focus(); return toast('답을 적어 주세요.'); }
+  $('#edit').close();
+  editing = null;
+  if (a === (cur.a || '') && !cur.ask) return toast('바뀐 게 없어요');
+  const part = { a, aat: Date.now(), ask: null };
+  // 시킨 일을 하다 클로드가 덧붙여 물은 것(again)에 답하면 다시 시킨다
+  if (cur.again) { part.go = Date.now(); part.again = null; }
+  try {
+    await withTimeout(store.patch(id, part), 8000);
+    toast(part.go ? '답을 넣었어요. 클로드가 이어서 해요' : '답을 넣었어요. 계획 파일에 적어 둘게요');
+  } catch (e) { toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
+}
+
+function openEdit(id, x) {
+  if (x.src) return openSrcAnswer(id, x);
+  editing = id;
+  setEditMode(false);
   $('#edit-t').value = x.t;
   setChip('etag', x.tag);
   $('#edit-hot').checked = !!x.hot;
@@ -672,6 +762,7 @@ function openEdit(id, x) {
 async function saveEdit() {
   const t = $('#edit-t').value.trim();
   if (!editing) return;
+  if (editSrc) return saveAnswer();
   if (shrinking.edit) return toast('사진을 줄이는 중이에요. 잠깐만요.');
   if (!t && !editPics.length) { $('#edit-t').focus(); return toast('글이나 사진 중 하나는 있어야 해요.'); }
   const id = editing;
