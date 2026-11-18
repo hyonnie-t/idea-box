@@ -52,10 +52,11 @@ function demoStore() {
     d1: { t: '책장 책 창에서 «읽는 중»이랑 «책 정보 고치기» 단추 하나로 합치면 좋겠어', at: now - 86400e3 * 2, tag: '책장', st: 'done', re: '계획 세션을 열어 두 양식을 하나로 합치는 안을 만들었어요.', rat: now - 86400e3 },
     d2: { t: '시간표 앱 할 일 탭에 «이번 주만 보기» 단추가 있으면 좋겠다', at: now - 3600e3 * 5, tag: '시간표', st: 'seen' },
     d3: { t: '다음 주 수업 웹앱 아이디어: 학생이 사료 카드를 시대순으로 끌어다 놓기', at: now - 600e3, tag: '수업', st: 'new', hot: true },
-    d4: { t: '책장 표지 색을 좀 더 따뜻하게 바꾸고 싶어', at: now - 86400e3 * 3, tag: '책장', st: 'seen', ask: true, again: true, re: '«따뜻하게»가 귤색 쪽이에요, 아니면 바랜 종이색 쪽이에요?\n고르시면 바로 바꿔 둘게요.', rat: now - 86400e3 * 2 },
-    d5: { t: '시간표 위젯 글씨가 작아\n폰에서 보면 한눈에 안 들어와', at: now - 86400e3 * 4, tag: '시간표', st: 'seen', re: '받아 뒀어요. 위젯 글씨 크기 고치기를 작업 현황에 올렸어요.', rat: now - 86400e3 * 3 },
     d7: { t: '블로그 글감 폴더 정리해 줘', at: now - 3600e3 * 2, tag: '글·블로그', st: 'seen', go: now - 60e3, run: { pc: 'CHAN', at: now - 60e3, n: 'wait' } },
     d9: { t: '위시리스트 앱 가격 알림 넣어 줘', at: now - 3600e3 * 6, tag: '일반', st: 'seen', go: now - 1800e3, run: { pc: 'USER', at: now - 1800e3, n: 'wait' } },
+    d4: { t: '책장 표지 색을 좀 더 따뜻하게 바꾸고 싶어', at: now - 86400e3 * 3, tag: '책장', st: 'seen', ask: true, again: true, re: '두 가지만 정해 주세요.\n① «따뜻하게»는 어느 쪽이에요? [귤색 / 바랜 종이색 / 둘 다 섞기]\n② 다크 모드도 같이 바꿀까요? [같이 / 밝은 화면만]', rat: now - 86400e3 * 2 },
+    d5: { t: '시간표 위젯 글씨가 작아\n폰에서 보면 한눈에 안 들어와', at: now - 86400e3 * 4, tag: '시간표', st: 'seen', re: '좋아요. 18px로 키워 두고 작업 현황에 올렸어요.', rat: now - 86400e3 * 2,
+      th: { m1: { w: 'c', x: '얼마나 키울까요? [16px / 18px / 20px]', at: now - 86400e3 * 3, q: true }, m2: { w: 'h', x: '18px', at: now - 86400e3 * 2.5 }, m3: { w: 'c', x: '좋아요. 18px로 키워 두고 작업 현황에 올렸어요.', at: now - 86400e3 * 2 } }, hat: now - 86400e3 * 2.5 },
     d8: { t: '책장 앱 검색창 글씨 크기 키워 줘', at: now - 3600e3 * 3, tag: '책장', st: 'seen', go: now - 600e3, run: { pc: 'CHAN', at: now - 300e3 } },
     d6: { t: '쪽지함 도구 정리', at: now - 86400e3 * 6, tag: '도구', st: 'done', re: '정리했어요.', rat: now - 86400e3 * 5 },
     // «효니에게 물을 것»(src, tools/asks.js가 계획·작업 목록에서 올림) — 판 맨 위 칸
@@ -82,7 +83,17 @@ function demoStore() {
   return {
     async watch(f) { cb = f; emit(); },
     async create(id, item) { if (!data[id]) data[id] = item; emit(); },
-    async patch(id, part) { data[id] = { ...data[id], ...part }; for (const k of Object.keys(part)) if (part[k] === null) delete data[id][k]; emit(); },
+    // Firebase update처럼 'th/키' 같은 깊은 길도 받는다
+    async patch(id, part) {
+      const o = (data[id] = structuredClone(data[id] || {}));
+      for (const [path, v] of Object.entries(part)) {
+        const ks = path.split('/');
+        let p = o;
+        for (const k of ks.slice(0, -1)) p = p[k] = p[k] && typeof p[k] === 'object' ? p[k] : {};
+        if (v === null) delete p[ks.at(-1)]; else p[ks.at(-1)] = v;
+      }
+      emit();
+    },
     async remove(id) { delete data[id]; delete pics[id]; emit(); },
     async putPics(id, p) { await wait(); pics[id] = { ...pics[id], ...p }; },
     async dropPics(id, keys) { for (const k of keys) delete pics[id]?.[k]; },
@@ -187,7 +198,26 @@ function bind() {
   $('#edit-form').addEventListener('submit', (e) => { e.preventDefault(); saveEdit(); });
   $('#edit-cancel').addEventListener('click', () => $('#edit').close());
   $('#edit-t').addEventListener('input', (e) => grow(e.target));
-  for (const d of [$('#ask'), $('#edit'), $('#pick')]) {
+  // 답하기 창(스레드)
+  $('#reply-form').addEventListener('submit', (e) => { e.preventDefault(); sendReply(); });
+  $('#reply-cancel').addEventListener('click', () => $('#reply').close());
+  $('#reply-edit').addEventListener('click', () => {
+    const id = replying?.id;
+    $('#reply').close();
+    if (id && ideas[id]) openEdit(id, ideas[id]);
+  });
+  $('#reply').addEventListener('close', () => { saveReplyDraft(); replying = null; });
+  $('#reply-qs').addEventListener('input', (e) => { if (e.target.matches('textarea')) grow(e.target); saveReplyDraft(); });
+  $('#reply-qs').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendReply(); } });
+  $('#reply-qs').addEventListener('click', (e) => {
+    const b = e.target.closest('.ropt');
+    if (!b) return;
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    for (const o of b.parentElement.querySelectorAll('.ropt')) o.setAttribute('aria-pressed', 'false');
+    b.setAttribute('aria-pressed', String(on));
+    saveReplyDraft();
+  });
+  for (const d of [$('#ask'), $('#edit'), $('#pick'), $('#reply')]) {
     // 바깥(어두운 곳)을 누르면 닫기
     // 창 자체에는 여백을 두지 않고(안쪽 form이 여백을 가짐) 바깥 좌표인지까지 본다 — 창 가장자리를 눌러 고치던 글이 날아가지 않게
     // 누른 곳과 뗀 곳이 모두 창 밖일 때만 닫는다(글을 고르다 바깥에서 손을 떼도 안 닫히게)
@@ -467,6 +497,50 @@ function renderList(items, fresh) {
 // 쪽지를 주제별 묶음으로 보고 체크(=끝남)한다. 새 상태는 만들지 않는다: 체크 = st done, 풀기 = 다시 열기와 같다.
 const isAsk = (x) => !!x.ask && x.st !== 'done' && !x.pending;
 const firstLine = (s) => (String(s || '').split('\n').find((l) => l.trim()) || '').trim();
+
+// ---------- 답하기 스레드(2026-11-18) ----------
+// th = {키: {w 'c'|'h', x 글, at 때, q 질문}}. re·rat은 «클로드 마지막 말» 사본이라, th의 클로드 말 중에 같은 글이 없으면
+// (옛 쪽지, 또는 re만 쓰는 runner.js·글감 ideas.js) 그 re를 rat 자리에 끼워 보인다. tools/inbox.js threadOf와 같은 식.
+function threadOf(x) {
+  const th = x.th && typeof x.th === 'object' ? x.th : {};
+  const list = Object.entries(th)
+    .filter(([, m]) => m && typeof m.x === 'string')
+    .map(([k, m]) => ({ k, w: m.w === 'h' ? 'h' : 'c', x: m.x, at: Number(m.at) || 0, q: !!m.q }));
+  if (x.re && !list.some((m) => m.w === 'c' && m.x === x.re)) list.push({ k: '', w: 'c', x: String(x.re), at: Number(x.rat) || Number(x.at) || 0, q: !!x.ask, legacy: true });
+  return list.sort((a, b) => a.at - b.at);
+}
+const lastClaude = (x) => threadOf(x).filter((m) => m.w === 'c').at(-1) || null;
+// 답할 수 있나: 안 끝났고, 올라간 쪽지이고, 클로드 말이 하나라도 있음
+// 물을 것(src, asks.js)은 답을 a 칸으로 받아 계획 파일에 적으므로 이 창을 쓰지 않는다(옛 답하기 openSrcAnswer)
+const canReply = (x) => x.st !== 'done' && !x.pending && !x.src && !!lastClaude(x);
+// 클로드 질문 나누기: ①②… 줄이 둘 이상이면 질문마다, 줄 끝 [가 / 나]는 고르는 단추. 질문이 하나면 [ ]가 있을 때만.
+const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩';
+function parseQs(text) {
+  const opts = (s) => {
+    const m = /\[([^\[\]]+)\]\s*$/.exec(s);
+    if (!m || !m[1].includes('/')) return { q: s.trim(), o: [] };
+    return { q: s.slice(0, m.index).trim(), o: m[1].split('/').map((v) => v.trim()).filter(Boolean).slice(0, 6) };
+  };
+  const lines = String(text || '').split('\n');
+  const qs = lines.filter((l) => CIRCLED.includes(l.trim()[0] || ' ')).map((l) => ({ n: l.trim()[0], ...opts(l.trim().slice(1)) }));
+  if (qs.length >= 2) return qs;
+  const one = lines.map((l) => opts(l)).find((r) => r.o.length);
+  return one ? [{ n: '', q: one.q, o: one.o }] : [];
+}
+// 말풍선들. 지금 묻는 중인 질문(ask 켜짐 + 마지막 클로드 말)만 귤색으로
+let freshMsg = null; // 방금 보낸 내 답(키) — 한 번 떠오르는 움직임
+function threadHtml(x) {
+  const list = threadOf(x);
+  if (!list.length) return '';
+  const lastC = list.filter((m) => m.w === 'c').at(-1);
+  const asking = isAsk(x);
+  return `<ol class="thread">${list.map((m) => {
+    const now = asking && m === lastC;
+    const cls = m.w === 'h' ? 'msg me' : `msg cl${now ? ' is-ask' : ''}`;
+    const who = m.w === 'h' ? '내 답' : now ? '❓ 클로드가 물어요' : m.q ? '클로드가 물었어요' : '클로드';
+    return `<li class="${cls}${m.k && m.k === freshMsg ? ' fresh' : ''}"><span class="who">${who}</span><p>${esc(m.x)}</p>${m.at ? `<time>${when(m.at)}</time>` : ''}</li>`;
+  }).join('')}</ol>`;
+}
 // 체크·되돌리기 patch(같은 계산을 카드 «끝남으로»·판 체크·되돌리기 줄이 함께 쓴다)
 // «답 필요»(ask)는 건드리지 않는다: 끝난 쪽지엔 표시가 안 되고, 나중에 «다시 열기»하면 질문이 그대로 돌아온다.
 // (Claude가 inbox.js reply/done을 하면 그때 꺼짐)
@@ -566,6 +640,7 @@ function row(x) {
   const expanded = openRows.has(x.id);
   const ph = Array.isArray(x.ph) ? x.ph.filter(Boolean) : [];
   const title = firstLine(x.t) || (ph.length ? `📷 사진 ${ph.length}장` : '(빈 쪽지)');
+  const last = threadOf(x).at(-1);
   const sub = x.pending ? '<span class="tsub wait">올라가길 기다리는 중</span>'
     : stale ? '<span class="tsub wait">⚠️ 멈춘 것 같아요 — 체크를 풀고 다시 체크해 주세요</span>'
     : running ? `<span class="tsub go">⏳ 클로드가 하는 중 · ${esc(x.run.pc || '')}</span>`
@@ -574,20 +649,23 @@ function row(x) {
     // 물을 것: 출처와 «답이 없으면», 답했으면 내 답(클로드가 덧붙여 물었으면 그 물음)
     : x.src && !(ask && x.re) ? (x.a ? `<span class="tsub">✍️ 내 답: ${esc(firstLine(x.a))}</span>`
       : `<span class="tsub src">📌 ${esc(x.src.l || '')}${x.src.d ? ` · 답이 없으면 ${esc(x.src.d)}` : ''}</span>`)
-    : x.re ? `<span class="tsub${ask ? ' ask' : ''}">${ask ? '❓ ' : '클로드: '}${esc(firstLine(x.re))}</span>` : '';
+    : last?.w === 'h' ? `<span class="tsub me">💬 내 답: ${esc(firstLine(last.x))}</span>`
+    : last ? `<span class="tsub${ask ? ' ask' : ''}">${ask ? '❓ ' : '클로드: '}${esc(firstLine(last.x))}</span>` : '';
   const marks = `${x.hot && !done ? '<span class="tmark hot" title="급해요">🔥</span>' : ''}${ph.length ? '<span class="tmark" title="사진">📷</span>' : ''}`;
   // 펼치면 제목 줄이 첫 줄 전체를 보여 주므로, 글은 그 다음 줄부터만
   const rest = String(x.t || '').replace(/^\s*[^\n]*\n?/, '').replace(/^\s+/, '');
   const src = x.src ? `<p class="src-info">📌 ${esc(x.src.l || '')} <span class="src-path">${esc(x.src.f || '')}</span></p>
       ${x.src.d ? `<p class="src-def">답이 없으면: ${esc(x.src.d)}</p>` : ''}
       ${x.a ? `<div class="reply mine"><span class="who">✍️ 내 답</span><p>${esc(x.a)}</p><time>${when(x.aat || x.at)}${x.aw ? ' · 계획 파일에 적음' : ''}</time></div>` : ''}` : '';
-  const editLabel = x.src ? (x.a && !ask ? '답 고치기' : '답하기') : ask ? '답하기' : '고치기';
+  // 물을 것(src)은 답 칸 a로 답한다(계획 파일에 적힘, openSrcAnswer). 일반 쪽지는 클로드 말이 있으면 대화(답하기 창)
+  const editBtn = x.src ? `<button type="button" data-act="edit">${x.a && !ask ? '답 고치기' : '답하기'}</button>`
+    : canReply(x) ? '<button type="button" data-act="reply">답하기</button>' : '<button type="button" data-act="edit">고치기</button>';
   const more = expanded ? `<div class="tmore">
       ${rest ? `<p class="text">${esc(rest)}</p>` : ''}
       ${src}
       ${ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : ''}
-      ${x.re ? `<div class="reply${ask ? ' is-ask' : ''}"><span class="who">${ask ? '❓ 클로드가 물어요' : '클로드'}</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : ''}
-      <div class="row"><span class="tmeta">${when(x.at)}${x.ed ? ' · 고침' : ''}</span><span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${editLabel}</button>${done || x.src ? '' : '<button type="button" data-act="done">끝남으로</button>'}`}${x.src ? '' : '<button type="button" class="del" data-act="del">지우기</button>'}</span></div>
+      ${threadHtml(x)}
+      <div class="row"><span class="tmeta">${when(x.at)}${x.ed ? ' · 고침' : ''}</span><span class="acts">${x.pending ? '' : `${editBtn}${done || x.src ? '' : '<button type="button" data-act="done">끝남으로</button>'}`}${x.src ? '' : '<button type="button" class="del" data-act="del">지우기</button>'}</span></div>
     </div>` : '';
   return `<li class="trow${done ? ' is-done' : ''}${go ? ' is-go' : ''}${ask ? ' is-ask' : ''}${x.hot && !done ? ' is-hot' : ''}${expanded ? ' open' : ''}" data-id="${esc(x.id)}">
     ${done ? `<label class="tcheck"><input type="checkbox" data-act="check" checked><span class="vh">끝남 — 풀면 다시 열어요: ${esc(title)}</span></label>`
@@ -676,7 +754,8 @@ function card(x) {
   const ico = (TAGS.find(([t]) => t === x.tag) || TAGS[0])[1];
   const st = x.pending ? '<span class="badge wait">올라가길 기다리는 중</span>' : `<span class="badge ${x.st}">${STATES[x.st] || ''}</span>`;
   const ask = isAsk(x);
-  const re = x.re ? `<div class="reply${ask ? ' is-ask' : ''}"><span class="who">${ask ? '❓ 클로드가 물어요' : '클로드'}</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : '';
+  const re = threadHtml(x);
+  const editBtn = canReply(x) ? '<button type="button" data-act="reply">답하기</button>' : '<button type="button" data-act="edit">고치기</button>';
   const ph = Array.isArray(x.ph) ? x.ph.filter(Boolean) : [];
   const pics = ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : '';
   const doneBtn = x.st === 'done' ? '<button type="button" data-act="reopen">다시 열기</button>' : '<button type="button" data-act="done">끝남으로</button>';
@@ -685,7 +764,7 @@ function card(x) {
     ${x.t ? `<p class="text">${esc(x.t)}</p>` : ''}
     ${pics}
     ${re}
-    <div class="row">${st}<span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${ask ? '답하기' : '고치기'}</button>${doneBtn}`}<button type="button" class="del" data-act="del">지우기</button></span></div>
+    <div class="row">${st}<span class="acts">${x.pending ? '' : `${editBtn}${doneBtn}`}<button type="button" class="del" data-act="del">지우기</button></span></div>
   </li>`;
 }
 
@@ -702,12 +781,14 @@ async function onListClick(e) {
     dropOutbox(id);
     dropOutPics(id);
     markDeleted(id);
+    setReplyDraft(id, null);
     render();
     if (!ideas[id]) return toast('지웠어요');
     return run(store.remove(id), '지웠어요');
   }
   if (!x) return;
   if (act === 'edit') return openEdit(id, x);
+  if (act === 'reply') return openReply(id);
   if (act === 'done') return checkItem(id, x, true);
   if (act === 'reopen') return checkItem(id, x, false);
 }
@@ -765,12 +846,10 @@ function openEdit(id, x) {
   $('#edit-t').value = x.t;
   setChip('etag', x.tag);
   $('#edit-hot').checked = !!x.hot;
-  // «답 필요» 쪽지는 고치기 창을 답하는 창으로 쓴다: 클로드 질문을 위에 보이고, 글 끝에 답을 덧붙여 저장
-  const ask = isAsk({ ...x, id });
-  $('#edit-ask').hidden = !ask;
-  $('#edit-ask-q').textContent = ask ? x.re || '' : '';
-  $('#edit-title').textContent = ask ? '클로드에게 답하기' : '쪽지 고치기';
-  $('#edit-ask .ask-help').textContent = `아래 글 끝에 답을 덧붙이고 저장하면 클로드가 ${x.again ? '바로 이어서 해요' : '다음에 읽어요'}.`;
+  // 답은 «답하기» 창(스레드)으로 한다. 이 창은 원래 글·사진·주제만 고친다(2026-11-18).
+  // 질문 상자(#edit-ask)는 물을 것(src) 답하기만 쓴다
+  $('#edit-ask').hidden = true;
+  $('#edit-title').textContent = '쪽지 고치기';
   editGen++;
   shrinking.edit = 0; // 앞 창에서 줄이던 사진은 버리므로 «줄이는 중» 칸도 비운다
   editPics = (Array.isArray(x.ph) ? x.ph.filter(Boolean) : []).map((k) => ({ k, src: `${id}/${k}`, old: true }));
@@ -839,10 +918,115 @@ async function pickPc() {
   });
 }
 
+// ---------- 답하기 창(스레드) ----------
+// 원래 글은 그대로 두고 답을 th에 새 메시지로 쌓는다. 쓰던 답은 쪽지마다 기기에 남긴다(창을 실수로 닫아도).
+const REPLY_DRAFT = 'ideabox-reply-draft';
+let replying = null; // { id, qs }
+function setReplyDraft(id, v) {
+  const m = ls.get(REPLY_DRAFT, {}) || {};
+  if (v == null) { if (!(id in m)) return; delete m[id]; } else m[id] = v;
+  ls.set(REPLY_DRAFT, m);
+}
+function openReply(id) {
+  const x = ideas[id];
+  if (!x || !canReply({ ...x, id })) return;
+  const lc = lastClaude(x);
+  // 지금 묻는 중이면 그 질문을 나눠 칸마다 답하게, 아니면 한 칸
+  const qs = isAsk({ ...x, id }) ? parseQs(lc.x) : [];
+  // lcAt: 창을 연 때의 클로드 마지막 말. 보낼 때 바뀌었으면(새 질문·끝남) 다시 보여 준다.
+  // k: 이 창에서 보낼 답의 키 — 끊겨서 다시 눌러도 같은 칸을 덮어 두 번 쌓이지 않게
+  replying = { id, qs, lcAt: lc.at, k: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), sending: false };
+  // 쓰던 답은 같은 질문(lcAt)일 때만 되살린다 — 클로드가 새로 물으면 옛 답이 새 칸에 들어가지 않게
+  const saved = ls.get(REPLY_DRAFT, {})?.[id];
+  const draft = saved && (saved.for == null || saved.for === lc.at) ? saved : {};
+  $('#reply-title').textContent = isAsk({ ...x, id }) ? '클로드에게 답하기' : '클로드와 이야기';
+  // 원래 글(내 쪽지)도 첫 말풍선으로
+  const ph = Array.isArray(x.ph) ? x.ph.filter(Boolean).length : 0;
+  $('#reply-thread').innerHTML = `<ol class="thread"><li class="msg me first"><span class="who">내 쪽지</span><p>${esc(x.t || '')}${ph ? `${x.t ? '\n' : ''}📷 사진 ${ph}장` : ''}</p><time>${when(x.at)}</time></li></ol>${threadHtml({ ...x, id })}`;
+  const box = $('#reply-qs');
+  if (qs.length) {
+    box.innerHTML = qs.map((q, i) => `<fieldset class="rq" data-i="${i}">
+      <legend>${q.n ? `<b>${q.n}</b> ` : ''}${esc(q.q || '고르기')}</legend>
+      ${q.o.length ? `<div class="ropts">${q.o.map((o) => `<button type="button" class="ropt" data-o="${esc(o)}" aria-pressed="${draft.pick?.[i] === o}">${esc(o)}</button>`).join('')}</div>` : ''}
+      <label class="vh" for="rq-${i}">${q.n || ''} ${q.o.length ? '덧붙일 말' : '답'}</label>
+      <textarea id="rq-${i}" rows="${q.o.length ? 1 : 2}" maxlength="2000" placeholder="${q.o.length ? '덧붙일 말(안 써도 돼요)' : '답'}">${esc(draft.text?.[i] || '')}</textarea>
+    </fieldset>`).join('');
+  } else {
+    box.innerHTML = `<label class="vh" for="rq-0">답</label><textarea id="rq-0" rows="3" maxlength="4000" placeholder="답을 적어 주세요">${esc(draft.text?.[0] || '')}</textarea>`;
+  }
+  $('#reply-help').textContent = `보내면 클로드가 ${x.again ? '바로 이어서 해요' : '다음에 읽어요'}. 원래 쪽지 글은 그대로예요.`;
+  $('#reply').showModal();
+  for (const t of box.querySelectorAll('textarea')) grow(t);
+  // 대화 맨 아래(지금 질문)가 보이게
+  const th = $('#reply-thread'); th.scrollTop = th.scrollHeight;
+  (box.querySelector('.ropt') || box.querySelector('textarea'))?.focus({ preventScroll: true });
+}
+function readReply() {
+  const box = $('#reply-qs');
+  const text = [...box.querySelectorAll('textarea')].map((t) => t.value.trim());
+  const pick = (replying?.qs || []).map((q, i) => box.querySelector(`.rq[data-i="${i}"] .ropt[aria-pressed="true"]`)?.dataset.o || '');
+  return { text, pick };
+}
+function saveReplyDraft() {
+  if (!replying) return;
+  const d = readReply();
+  setReplyDraft(replying.id, d.text.some(Boolean) || d.pick.some(Boolean) ? { ...d, for: replying.lcAt } : null);
+}
+async function sendReply() {
+  // 보내는 중에 또 누르면(Ctrl+Enter 두 번 등) 무시 — 같은 답이 두 번 쌓이지 않게
+  if (!replying || replying.sending) return;
+  const r = replying;
+  const { id, qs } = r;
+  const cur = ideas[id];
+  if (!cur) { $('#reply').close(); return toast('다른 곳에서 지워진 쪽지예요.'); }
+  // 창을 연 사이 끝났거나(실행기 done·판 체크) 클로드가 새 말을 달았으면 보내지 않고 새 내용을 다시 보여 준다(쓴 답은 남음)
+  if (cur.st === 'done') { saveReplyDraft(); $('#reply').close(); return toast('그새 끝난 쪽지예요. 이어서 하려면 «다시 열기» 뒤에 답해 주세요.'); }
+  if ((lastClaude(cur)?.at || 0) !== r.lcAt) { saveReplyDraft(); $('#reply').close(); toast('클로드가 그새 새 말을 달았어요. 다시 보여 드릴게요.'); return openReply(id); }
+  const { text, pick } = readReply();
+  let msg;
+  if (qs.length) {
+    const ans = qs.map((q, i) => [pick[i], text[i]].filter(Boolean).join(' — '));
+    if (!ans.some(Boolean)) return toast('답을 하나는 적거나 골라 주세요.');
+    const missing = qs.filter((q, i) => !ans[i]).map((q) => q.n || '질문');
+    if (missing.length && !(await ask(`${missing.join(' ')}에 답이 비었어요. 그래도 보낼까요?`, { yes: '그래도 보내기', no: '마저 답하기', danger: false }))) return;
+    msg = qs.length === 1 && !qs[0].n ? ans[0] : qs.map((q, i) => `${q.n || `${i + 1}.`} ${ans[i] || '(답 안 함)'}`).join('\n');
+  } else {
+    msg = text[0];
+    if (!msg) { $('#rq-0').focus(); return toast('답을 적어 주세요.'); }
+  }
+  if (replying !== r) return; // 확인 창을 띄운 사이 창이 닫혔으면 그만
+  const now = Date.now();
+  const k = r.k;
+  const part = { [`th/${k}`]: { w: 'h', x: msg, at: now }, hat: now, st: 'new', ask: null };
+  // 옛 방식 답장(re만 있고 th에 없음)은 같이 th로 옮겨 둔다 — 다음 답장이 re를 덮어도 대화에 남게
+  for (const m of threadOf(cur)) if (m.legacy) part[`th/m${(m.at || now).toString(36)}r`] = { w: 'c', x: m.x, at: m.at || now, ...(m.q ? { q: true } : {}) };
+  // 시킨 일 중에 물은 것(again)에 답하면 다시 시켜 이어서 하게 한다
+  // 하던 PC(spc)를 다시 고른 것으로 적는다(PC 고르기, saveEdit과 같음). 모르면 먼저 본 PC가.
+  if (cur.again) { part.go = now; part.again = null; if (cur.spc) part.run = { pc: cur.spc, at: now, n: 'wait' }; }
+  const btn = $('#reply-send');
+  btn.disabled = true;
+  r.sending = true;
+  try {
+    await withTimeout(store.patch(id, part), 8000);
+    setReplyDraft(id, null);
+    replying = null;
+    freshMsg = k;
+    setTimeout(() => { if (freshMsg === k) freshMsg = null; }, 1500);
+    $('#reply').close();
+    toast(part.go ? '답을 보냈어요. 클로드가 이어서 해요' : '답을 보냈어요. 클로드가 다음에 읽어요');
+    render();
+  } catch (e) { toast('보내지 못했어요. 다시 눌러도 한 번만 들어가요.'); }
+  finally { btn.disabled = false; r.sending = false; }
+}
+
 // 앱 안 확인 창(브라우저 confirm 대신)
-function ask(msg) {
+// 단추 글은 기본이 «지우기»(빨강)/«그만두기», 답하기 창은 다른 글을 넘긴다
+function ask(msg, { yes = '지우기', no = '그만두기', danger = true } = {}) {
   const d = $('#ask');
   $('#ask-msg').textContent = msg;
+  $('#ask-yes').textContent = yes;
+  $('#ask-yes').classList.toggle('danger', danger);
+  $('#ask-no').textContent = no;
   return new Promise((ok) => {
     const done = (v) => { d.removeEventListener('close', onClose); $('#ask-yes').onclick = $('#ask-no').onclick = null; ok(v); };
     const onClose = () => done(d.returnValue === 'yes');

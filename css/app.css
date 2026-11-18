@@ -164,13 +164,6 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
 .hotmark { background: var(--hot-soft); color: var(--hot-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
 .meta time { margin-left: auto; }
 .text { margin: var(--space-2) 0 0; white-space: pre-wrap; font-size: 1.02rem; }
-.reply {
-  margin-top: var(--space-3); background: var(--mint-soft); border-radius: 4px var(--radius) var(--radius) var(--radius);
-  padding: var(--space-2) var(--space-3);
-}
-.reply .who { font-size: .8rem; color: var(--mint-t); font-weight: 700; }
-.reply p { margin: var(--space-1) 0 0; white-space: pre-wrap; }
-.reply time { display: block; font-size: .8rem; color: var(--soft); margin-top: var(--space-1); }
 .row { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); flex-wrap: wrap; }
 .badge { font-size: .8rem; border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; }
 .badge.new { background: var(--accent-soft); color: var(--accent-t); font-weight: 700; }
@@ -249,12 +242,55 @@ html:has(dialog[open]) { overflow: hidden; }
 
 /* «답 필요» 표시 */
 .askmark { background: var(--accent-soft); color: var(--accent-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
-.reply.is-ask { background: var(--accent-soft); }
-.reply.is-ask .who { color: var(--accent-t); }
+/* 물을 것(src) 답하기 창의 물음 상자·내 답(asks.js 흐름은 그대로) */
+.reply {
+  margin-top: var(--space-3); background: var(--mint-soft); border-radius: 4px var(--radius) var(--radius) var(--radius);
+  padding: var(--space-2) var(--space-3);
+}
+.reply .who { font-size: .8rem; color: var(--mint-t); font-weight: 700; }
+.reply p { margin: var(--space-1) 0 0; white-space: pre-wrap; }
+.reply time { display: block; font-size: .8rem; color: var(--soft); margin-top: var(--space-1); }
 .ask-q { background: var(--accent-soft); border-radius: 8px; padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); }
 .ask-q .ask-who { font-size: .85rem; font-weight: 700; color: var(--accent-t); }
 .ask-q .ask-text { margin-top: var(--space-1); white-space: pre-wrap; }
 .ask-q .ask-help { margin-top: var(--space-2); font-size: .85rem; color: var(--soft); }
+
+/* 답하기 스레드(2026-11-18): 클로드 말은 왼쪽 민트(지금 질문은 귤색), 내 답은 오른쪽 하늘색 */
+.thread { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.msg { max-width: 88%; padding: var(--space-2) var(--space-3); border-radius: 4px var(--radius) var(--radius) var(--radius); background: var(--mint-soft); align-self: flex-start; }
+.msg .who { font-size: .8rem; font-weight: 700; color: var(--mint-t); }
+.msg p { margin: var(--space-1) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg time { display: block; font-size: .8rem; color: var(--soft); margin-top: var(--space-1); }
+.msg.is-ask { background: var(--accent-soft); }
+.msg.is-ask .who { color: var(--accent-t); }
+.msg.me { align-self: flex-end; background: var(--sky-soft); border-radius: var(--radius) 4px var(--radius) var(--radius); }
+.msg.me .who { color: var(--sky-t); }
+.msg.me time { text-align: right; }
+.msg.fresh { animation: rise .35s var(--bounce); }
+.tsub.me { color: var(--sky-t); }
+
+/* 답하기 창: 대화는 위에서 따로 밀리고, 답 칸은 아래에 */
+.reply-thread { max-height: 40vh; overflow: auto; margin: 0 calc(-1 * var(--space-2)); padding: 0 var(--space-2) var(--space-2); overscroll-behavior: contain; }
+.reply-thread .thread:first-child { margin-top: 0; }
+.reply-thread .thread + .thread { margin-top: var(--space-2); }
+.reply-qs { display: grid; gap: var(--space-3); margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line); }
+.sheet .reply-qs textarea { min-height: 48px; }
+.rq { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: var(--space-2); }
+.rq legend { padding: 0; margin-bottom: var(--space-2); font-size: .95rem; line-height: 1.5; }
+.rq legend b { color: var(--accent-t); }
+.ropts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ropt {
+  min-height: 40px; padding: 0 var(--space-3); border-radius: 999px; border: 1px solid var(--line); background: var(--paper);
+  color: var(--ink); font-size: .95rem; cursor: pointer; transition: transform .15s var(--bounce), background .15s, border-color .15s;
+}
+.ropt:active { transform: scale(.96); }
+.ropt[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-t); font-weight: 700; animation: pop .25s var(--bounce); }
+.ropt[aria-pressed="true"]::before { content: '✓ '; }
+.ropt:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.reply-help { margin-top: var(--space-2) !important; font-size: .85rem; color: var(--soft); }
+/* 낮은 폰 화면에서도 «보내기»가 늘 보이게 아래에 붙인다(창 안에서 위 내용만 밀림) */
+.reply-sheet .sheet-foot { flex-wrap: wrap; position: sticky; bottom: calc(-1 * var(--space-4)); background: var(--paper); padding-block: var(--space-2) var(--space-4); margin-bottom: calc(-1 * var(--space-4)); }
+.reply-sheet .reply-edit { margin-right: auto; }
 
 /* 할 일 판 */
 .board { margin-top: var(--space-3); }
