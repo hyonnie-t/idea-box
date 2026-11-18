@@ -12,7 +12,8 @@
 // 여러 PC가 같이 돌아도 한 번만 하게: run에 내 표(n)를 쓰고 몇 초 뒤 다시 읽어 내 표일 때만 시작한다.
 // «효니에게 물을 것»(2026-11-18): 켜질 때와 10분마다 tools/asks.js로 계획·작업 목록의 물을 것을 올리고 효니 답을 출처 파일에 적는다.
 //   물을 것(src 칸)을 시키면 그 출처 파일에서 이어 가라는 지시문으로 세션을 연다.
-// 한 PC에서 한 번에 하나만 한다. 세션이 답장 없이 끝나면 클로드 마지막 말을 답장으로 남기고 go를 끈다(효니가 다시 체크하면 이어서).
+// 한 PC에서 한 번에 2개(MAX)까지 한다(2026-11-18 밤, 출처: 효니 말 «2개씩은 되야할 거 같은데»). 켜짐 신호에 지금 도는 수(busy)·상한(max)도 적는다.
+// 세션이 답장 없이 끝나면 클로드 마지막 말을 답장으로 남기고 go를 끈다(효니가 다시 체크하면 이어서).
 process.noDeprecation = true;
 const { spawnSync, spawn } = require('child_process');
 const crypto = require('crypto');
@@ -30,6 +31,7 @@ const DRY = process.argv.includes('--dry');
 const EVERY = 60e3;
 const STALE = 4 * 3600e3; // 다른 PC의 «하는 중»이 이만큼 지나면 멈춘 것으로 본다
 const LIMIT = 2 * 3600e3; // 세션 하나가 이보다 길면 끈다
+const MAX = 2; // 한 PC에서 동시에 돌리는 세션 수 상한(세션마다 MCP 서버까지 떠서 RAM이 빠듯함 — 2026-11-10 RAM 바닥 일)
 
 // 교사업무 폴더: 이 파일은 교사업무\웹앱\idea-box\tools
 function findRoot() {
@@ -145,7 +147,8 @@ function beat() {
   if (Date.now() - canRun.at > 10 * 60e3) { const was = canRun.ok; checkClaude(); if (was !== canRun.ok) log(canRun.ok ? 'claude 열 수 있음' : `claude 못 엶: ${canRun.why}`); }
   const tmp = path.join(os.tmpdir(), 'ideabox-run-beat.json');
   try {
-    fs.writeFileSync(tmp, JSON.stringify({ [PC]: { at: Date.now(), ok: canRun.ok, why: canRun.why || null } }));
+    // busy = 지금 이 PC에서 도는 시킨 일 수, max = 상한(앱이 «앞 일 N개»를 보일 때 씀. 옛 실행기는 이 두 칸이 없다)
+    fs.writeFileSync(tmp, JSON.stringify({ [PC]: { at: Date.now(), ok: canRun.ok, why: canRun.why || null, busy: running.size, max: MAX } }));
     fbcli(['database:update', `/users/${UID}/ideaRunners`, q(tmp), '--force']);
   } catch (e) { log('켜짐 신호 실패: ' + e.message.slice(0, 160)); } finally { fs.rmSync(tmp, { force: true }); }
 }
@@ -211,15 +214,20 @@ function asksTick() {
   } catch (e) { log('물을 것 맞추기 실패: ' + String(e.message || e).slice(0, 160)); } finally { asksBusy = false; }
 }
 
-let busy = false;
-let myN = ''; // 이 실행기가 지금 돌리는 일의 표
+// 이 실행기가 지금 돌리는(또는 가져가는 중인) 일: 표 n → 쪽지 id. 2개까지(MAX).
+// «멈췄어요» 판정은 이 표들 전부를 봐야 한다 — 표 하나만 보면 두 번째 일을 남의 멈춘 일로 꺼 버린다.
+const running = new Map();
+let stepping = false; // 읽기·가져가기 동안 다음 tick이 끼어들지 않게(세션이 도는 동안은 막지 않음)
 async function tick() {
   if (!DRY) touchLock();
-  if (busy) return;
-  if (!ONCE && !DRY) { if (lockPid() !== process.pid) { log('잠금이 다른 실행기 것이라 끝냄'); process.exit(0); } restartIfChanged(); }
-  busy = true; // 읽기·가져가기 동안 다음 tick이 끼어들지 않게. 세션을 열면 끝날 때 풂
-  let started = false;
-  try { started = await step(); } finally { if (!started) busy = false; }
+  if (stepping) return;
+  if (!ONCE && !DRY) {
+    if (lockPid() !== process.pid) { log('잠금이 다른 실행기 것이라 끝냄'); process.exit(0); }
+    if (!running.size) restartIfChanged(); // 새 판으로 바꿔 켜기는 도는 일이 하나도 없을 때만
+  }
+  if (running.size >= MAX) return;
+  stepping = true;
+  try { await step(); } finally { stepping = false; }
 }
 async function step() {
   let all;
@@ -238,7 +246,7 @@ async function step() {
     // 이 PC 것: 내가 돌리는 일도 아니고, 그 일을 연 실행기(run.rp)도 죽었을 때만. 다른 PC 것: 4시간 넘었을 때
     // (세션 제한 2시간+10분이 넘은 run은 pid가 살아 있어도 멈춘 것 — 재부팅 뒤 같은 pid를 다른 프로그램이 쓸 수 있다)
     const tooOld = x.run && now - (x.run.at || 0) > LIMIT + 10 * 60e3;
-    const mineDead = x.run && x.run.pc === PC && x.run.n !== myN && (tooOld || !(x.run.rp && x.run.rp !== process.pid && alive(x.run.rp)));
+    const mineDead = x.run && x.run.pc === PC && !running.has(x.run.n) && (tooOld || !(x.run.rp && x.run.rp !== process.pid && alive(x.run.rp)));
     const stale = x.run && (x.run.pc === PC ? mineDead : now - (x.run.at || 0) > STALE);
     if (stale && x.st !== 'done' && !DRY) {
       log(`${id} 멈춘 일 내려놓음(맡은 PC ${x.run.pc})`);
@@ -254,13 +262,23 @@ async function step() {
   }
   const todo = Object.entries(all).filter(([, x]) => mine(x)).sort((a, b) => a[1].go - b[1].go);
   if (!todo.length) return;
-  const [id, x] = todo[0];
-  if (DRY) { log(`(dry) 할 일: ${id} «${firstLine(x.t).slice(0, 40)}»${isWait(x) ? ' (효니가 이 PC를 고름)' : ''}${canRun.ok ? '' : ` — 못 가져감(${canRun.why})`}`); return; }
-  if (!canRun.ok) { if (Date.now() - canRun.at > 5 * 60e3) checkClaude(); if (!canRun.ok) { log(`${id} 건너뜀: ${canRun.why}`); return; } }
+  if (DRY) {
+    todo.forEach(([id, x], i) => log(`(dry) 할 일: ${id} «${firstLine(x.t).slice(0, 40)}»${isWait(x) ? ' (효니가 이 PC를 고름)' : ''}${canRun.ok ? (i < MAX - running.size ? ' — 지금 시작' : ' — 앞 일이 끝나면 시작') : ` — 못 가져감(${canRun.why})`}`));
+    return;
+  }
+  if (!canRun.ok) { if (Date.now() - canRun.at > 5 * 60e3) checkClaude(); if (!canRun.ok) { log(`${todo[0][0]} 건너뜀: ${canRun.why}`); return; } }
+  // 빈 칸만큼 오래 기다린 것부터 차례로 가져간다(가져가기 하나에 10~15초, 줄 선 나머지는 앞 일이 끝나면 close가 tick을 부름)
+  for (const [id, x] of todo) {
+    if (running.size >= MAX) break;
+    await startOne(id, x);
+  }
+}
+async function startOne(id, x) {
   // 가져가기: 내 표를 쓰고 몇 초 뒤 다시 읽어 확인(다른 PC와 겹치지 않게)
   const n = crypto.randomBytes(4).toString('hex');
   const resume = x.sid && x.spc === PC;
   const sid = resume ? x.sid : crypto.randomUUID();
+  let took = false;
   try {
     // 쓰는 PC 먼저(2026-11-18, 출처: 효니 말 «학교 PC로 갔다는데 왜 글로 가?»): 효니가 5분 넘게 안 만진 PC는 90초 기다렸다가 본다.
     // 그 사이 효니가 쓰고 있는 PC가 가져가면 아래 «그새 바뀜»으로 물러난다. 쓰는 PC가 없으면 쉬는 PC가 한다.
@@ -269,13 +287,14 @@ async function step() {
     const pre = readOne(id); // 쓰기 직전에 한 번 더: 그새 다른 PC가 가져갔으면 손대지 않음
     if (!mine(pre)) { log(`${id} 그새 바뀜 — 건너뜀`); return; }
     // st new → seen: 받아 두기(ideabox-collect)가 «새 쪽지»로 보고 reply로 덮지 않게
-    myN = n;
+    running.set(n, id); // patch 전에 넣어야 이 사이 «멈췄어요» 판정이 내 표를 남의 것으로 보지 않는다
     patch(id, { run: { pc: PC, at: Date.now(), n, sid, rp: process.pid }, rep: null, ...(pre.st === 'new' ? { st: 'seen' } : {}) });
     await sleep(10000 + Math.random() * 5000);
     const back = readOne(id);
     if (!back || back.run?.n !== n) { log(`${id} 다른 PC가 가져감`); return; }
     if (!back.go) { log(`${id} 그새 효니가 체크를 풂`); patch(id, { run: null }); return; }
-  } catch (e) { myN = ''; log(`${id} 가져가기 실패: ${e.message.slice(0, 160)}`); return; } // myN을 비워야 쓰다 만 내 run을 다음 tick이 내려놓는다
+    took = true;
+  } catch (e) { log(`${id} 가져가기 실패: ${e.message.slice(0, 160)}`); return; } finally { if (!took) running.delete(n); } // 표를 빼야 쓰다 만 내 run을 다음 tick이 내려놓는다
   // 물을 것이면 효니 답을 출처 파일에 먼저 적어 둔다(10분 맞추기를 기다리지 않게)
   if (x.src && x.a) { try { log(`${id} 답 적기: ${require('./asks.js').writeOne(id, x)}`); } catch (e) { log(`${id} 답 적기 실패: ${String(e.message || e).slice(0, 160)}`); } }
   log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
@@ -292,8 +311,6 @@ async function step() {
   const killer = setTimeout(() => { err += ' 2시간 넘어 끔'; try { child.kill(); } catch (e) {} }, LIMIT);
   child.on('close', (code) => {
     clearTimeout(killer);
-    busy = false;
-    myN = '';
     let result = '';
     try { result = JSON.parse(out).result || ''; } catch (e) { result = out.trim().slice(-400); }
     log(`${id} 끝(코드 ${code})${err ? ' 오류: ' + err.trim().slice(-200) : ''}`);
@@ -311,10 +328,11 @@ async function step() {
         patch(id, { run: null, go: null, st: 'seen', re, rat: Date.now(), rep: Date.now(), ...(noStart ? {} : { sid, spc: PC }) });
       } else if (after) patch(id, { sid, spc: PC });
     } catch (e) { log(`${id} 마무리 쓰기 실패: ${e.message.slice(0, 160)}`); }
-    if (ONCE) process.exit(0);
+    // 마무리를 쓴 뒤에 표를 뺀다(firebase 쓰기는 동기라 그 사이 tick이 끼지 않지만, 순서로도 «내 일»이 남의 멈춘 일로 보이지 않게)
+    running.delete(n);
+    if (ONCE) { if (!running.size) process.exit(0); return; }
     setTimeout(tick, 2000); // 줄 선 다음 일
   });
-  return true;
 }
 
 (async () => {
@@ -326,7 +344,7 @@ async function step() {
   if (!DRY) beat();
   asksTick();
   await tick();
-  if (ONCE || DRY) { if (!busy) process.exit(0); return; }
+  if (ONCE || DRY) { if (!running.size) process.exit(0); return; }
   setInterval(tick, EVERY);
   setInterval(beat, EVERY);
   setInterval(asksTick, ASK_EVERY);
