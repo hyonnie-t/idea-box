@@ -145,8 +145,15 @@ if (cmd === 'seen') {
     console.error(`${id}: 이미 끝남(답장: ${data[id].re || '없음'}) — 덮지 않았어요. 바꾸려면 --force`);
     process.exit(2);
   }
+  // 쪽지함 실행기가 연 자동 세션(IDEABOX_AUTO=1)은 «끝남»을 정하지 않는다 — 효니가 보고 확인한 뒤 앱에서 끝낸다.
+  // done을 불러도 답장(seen)으로 남기고, rep(보고할 때)를 찍어 앱이 «클로드가 다 했어요» 창을 띄우게 한다
+  // (2026-11-18, 출처: 효니 말 «나 확인도 안 했는데 그냥 완료됨으로 넘어가버리는데», «끝나면 나한테 보고를 해줘야 알 거 아냐 팝업을 띄우든지»)
+  const auto = process.env.IDEABOX_AUTO === '1';
+  if (auto && cmd === 'done') console.log('(자동 세션이라 «끝남» 대신 답장으로 남겨요. 끝내기는 효니가 앱에서)');
   // ask는 «답 필요»를 켜고, reply·done은 끈다(null = 칸 지우기)
-  const part = { st: cmd === 'done' ? 'done' : 'seen', ask: cmd === 'ask' ? true : null, go: null, run: null };
+  const part = { st: cmd === 'done' && !auto ? 'done' : 'seen', ask: cmd === 'ask' ? true : null, go: null, run: null };
+  if (auto) part.rep = Date.now();
+  else if (cmd === 'done') part.rep = null; // 손으로 끝내면 보고 창에서도 빠짐
   // 시킨 일(go·run)을 하다 물으면, 효니가 답할 때 앱이 다시 시키도록 표시
   part.again = cmd === 'ask' && (data[id].go || data[id].run || data[id].again) ? true : null;
   if (re) {
@@ -195,7 +202,7 @@ if (cmd === 'seen') {
     const answered = x.st === 'new' && x.re && x.ed && x.rat && x.ed > x.rat;
     // 앱 «답하기»(스레드)로 효니가 답한 새 쪽지 — 받아 두기는 위와 같이 seen만
     const replied = x.st === 'new' && x.hat && (!x.rat || x.hat > x.rat);
-    const goMark = x.st === 'done' ? '' : x.run && x.run.n === 'wait' ? ` 🤖시킴(${x.run.pc || '?'}에서 할 차례)` : x.run ? ` 🤖하는 중(${x.run.pc || '?'})` : x.go ? ' 🤖시킴' : '';
+    const goMark = x.st === 'done' ? '' : x.run && x.run.n === 'wait' ? ` 🤖시킴(${x.run.pc || '?'}에서 할 차례)` : x.run ? ` 🤖하는 중(${x.run.pc || '?'})` : x.go ? ' 🤖시킴(PC 안 고름 — 실행기가 돌려보냄)' : x.rep ? ' 🔔다 했음(효니 확인 기다림)' : '';
     console.log(`[${x.id}] ${x.st}${goMark}${x.hot ? ' 🔥급함' : ''}${x.ask && x.st !== 'done' ? ' ❓답 기다림' : ''}${replied ? ' 💬 효니가 답함' : answered ? ' ✍️ 효니가 답장 뒤 고침' : ''} · ${x.tag || '일반'} · ${when(x.at)}${nPh ? ` · 📷 사진 ${nPh}장` : ''}`);
     console.log('  ' + (x.t ? String(x.t).replace(/\n/g, '\n  ') : '(글 없이 사진만)'));
     if (nPh) {

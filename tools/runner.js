@@ -150,8 +150,11 @@ function beat() {
   } catch (e) { log('켜짐 신호 실패: ' + e.message.slice(0, 160)); } finally { fs.rmSync(tmp, { force: true }); }
 }
 const isWait = (x) => !!x.run && x.run.n === 'wait'; // 앱이 «이 PC에서 해 줘»라고 적어 둔 것(아직 아무도 안 가져감)
-// 내 일: 효니가 이 PC를 고른 쪽지, 또는 PC를 안 고른 옛 방식(go만 있음)
-const mine = (x) => !!x && !!x.go && x.st !== 'done' && (isWait(x) ? x.run.pc === PC : !x.run);
+// 내 일: 효니가 이 PC를 고른 쪽지만. PC를 안 고른 시키기(go만, 옛 화면)는 아무 PC도 가져가지 않고 «앱을 다시 열고 체크»로 돌려보낸다
+// (2026-11-18, 출처: 효니 말 «쪽지함에서 일 시키면 컴퓨터 고르게 한다고 하지 않았냐», 이 PC를 쓰지도 않는데 학교 PC가 먼저 보던 일)
+const mine = (x) => !!x && !!x.go && x.st !== 'done' && isWait(x) && x.run.pc === PC;
+const noPick = (x) => !!x && !!x.go && !x.run && x.st !== 'done';
+const NO_PICK_RE = 'PC를 고르지 않고 시켜서 시작하지 않았어요(앱이 예전 화면이었을 수 있어요). 앱을 완전히 껐다 다시 열고 체크하면 «어느 PC에서 할까요?»가 떠요.';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const firstLine = (s) => (String(s || '').split('\n').find((l) => l.trim()) || '').trim();
 
@@ -161,7 +164,7 @@ function prompt(id, resumed, x = {}) {
   const inbox = 'node 웹앱/idea-box/tools/inbox.js';
   const stop = `되돌리기 어려운 일 — ${NO_GO} — 과 효니만 정할 수 있는 일은 하지 않는다. 미리보기·초안까지 만든 뒤 \`${inbox} ask ${id} "질문"\` 으로 묻고 끝낸다. 질문은 쉬운 말로, 물을 것이 여럿이면 «① …» «② …» 줄마다 하나씩, 고를 것은 줄 끝에 «[가 / 나 / 다]» — 앱이 질문마다 답 칸과 번호 단추를 보인다.`;
   const tail = [
-    `다 하면 \`${inbox} done ${id} "한 일 한두 줄(쉬운 말, 만든 파일·주소 포함)"\`. 다 못 했으면 \`${inbox} reply ${id} "한 것 · 남은 것"\`. 답장은 효니가 폰에서 읽는다.`,
+    `다 하면 \`${inbox} reply ${id} "결과(쉬운 말, 만든 파일·주소 포함)"\` — «끝남»은 효니가 답장을 보고 앱에서 정하니 done은 쓰지 않는다. 묻는 답이면 답 자체를 답장에 적는다(«파일 보세요»로 끝내지 않기). 다 못 했으면 \`${inbox} reply ${id} "한 것 · 남은 것"\`. 답장은 효니가 폰에서 읽는다.`,
     '이 세션은 쪽지함이 연 자동 세션이다: 첫 응답 머릿말·사이드바 정리·결과 보고 페이지는 하지 않고, 결과는 쪽지 답장으로만 남긴다.',
   ];
   if (x.src) {
@@ -185,7 +188,7 @@ function prompt(id, resumed, x = {}) {
     '2. 교사업무 CLAUDE.md와 관련 레포 CLAUDE.md 규칙대로 끝까지 한다. 효니는 자리에 없다고 보고 묻지 않는다: 되돌릴 수 있는 일은 기본값으로 진행한다.',
     `3. ${stop}`,
     `4. ${tail[0]}`,
-    `5. 클로드작업/작업 현황.md «⏳ 열린 일»에 이 쪽지 id가 든 💌 줄이 있으면 done 때 그 줄을 지운다(여러 id를 묶은 줄이면 이 id만 빼기).`,
+    `5. 클로드작업/작업 현황.md «⏳ 열린 일»의 이 쪽지 💌 줄은 그대로 둔다(효니가 앱에서 끝내면 받아 두기가 지운다).`,
     `6. ${tail[1]}`,
   ].join('\n');
 }
@@ -228,7 +231,7 @@ async function step() {
       // 효니가 고른 PC가 4시간 넘게 안 가져감(꺼져 있음) → 알리고 내려놓기. 그 전엔 그대로 둔다(하는 중인 run이 아님)
       if (now - (x.run.at || 0) > STALE && x.st !== 'done' && !DRY) {
         log(`${id} 고른 PC(${x.run.pc})가 안 가져감 — 내려놓음`);
-        try { patch(id, { run: null, go: null, st: 'seen', re: `${x.run.pc} PC가 시작하지 못했어요(꺼져 있거나 클로드를 못 엶). 다시 체크해서 켜진 PC를 골라 주세요.`, rat: now }); } catch (e) {}
+        try { patch(id, { run: null, go: null, st: 'seen', re: `${x.run.pc} PC가 시작하지 못했어요(꺼져 있거나 클로드를 못 엶). 다시 체크해서 켜진 PC를 골라 주세요.`, rat: now, rep: now }); } catch (e) {}
       }
       continue;
     }
@@ -239,8 +242,15 @@ async function step() {
     const stale = x.run && (x.run.pc === PC ? mineDead : now - (x.run.at || 0) > STALE);
     if (stale && x.st !== 'done' && !DRY) {
       log(`${id} 멈춘 일 내려놓음(맡은 PC ${x.run.pc})`);
-      try { patch(id, { run: null, go: null, st: 'seen', re: `중간에 멈췄어요(${x.run.pc} PC가 꺼졌거나 끊김). 다시 체크하면 다시 할게요.`, rat: now }); } catch (e) {}
+      try { patch(id, { run: null, go: null, st: 'seen', re: `중간에 멈췄어요(${x.run.pc} PC가 꺼졌거나 끊김). 다시 체크하면 다시 할게요.`, rat: now, rep: now }); } catch (e) {}
     }
+  }
+  for (const [id, x] of Object.entries(all)) {
+    if (!noPick(x)) continue;
+    if (DRY) { log(`(dry) ${id} PC를 안 고른 시키기 — 돌려보낼 것`); continue; }
+    log(`${id} PC를 안 고른 시키기 — 돌려보냄`);
+    // st는 그대로(새 쪽지면 받아 두기가 계속 읽게). 같은 순간 옛 실행기가 run을 썼다면 그쪽이 go 없음을 보고 스스로 내려놓는다
+    try { patch(id, { go: null, again: null, re: NO_PICK_RE, rat: now, rep: now }); } catch (e) {}
   }
   const todo = Object.entries(all).filter(([, x]) => mine(x)).sort((a, b) => a[1].go - b[1].go);
   if (!todo.length) return;
@@ -260,7 +270,7 @@ async function step() {
     if (!mine(pre)) { log(`${id} 그새 바뀜 — 건너뜀`); return; }
     // st new → seen: 받아 두기(ideabox-collect)가 «새 쪽지»로 보고 reply로 덮지 않게
     myN = n;
-    patch(id, { run: { pc: PC, at: Date.now(), n, sid, rp: process.pid }, ...(pre.st === 'new' ? { st: 'seen' } : {}) });
+    patch(id, { run: { pc: PC, at: Date.now(), n, sid, rp: process.pid }, rep: null, ...(pre.st === 'new' ? { st: 'seen' } : {}) });
     await sleep(10000 + Math.random() * 5000);
     const back = readOne(id);
     if (!back || back.run?.n !== n) { log(`${id} 다른 PC가 가져감`); return; }
@@ -271,7 +281,8 @@ async function step() {
   log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
   const args = ['-p', prompt(id, resume, x), '--permission-mode', 'auto', '--output-format', 'json',
     '-n', `💌 ${firstLine(x.t).slice(0, 24) || '쪽지 ' + id}`, ...(resume ? ['--resume', sid] : ['--session-id', sid])];
-  const child = spawn('claude', args, { cwd: ROOT, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  // IDEABOX_AUTO: 세션 안 inbox.js가 done을 답장으로 바꾸고 rep(보고)를 찍는다
+  const child = spawn('claude', args, { cwd: ROOT, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, IDEABOX_AUTO: '1' } });
   let out = '';
   let err = '';
   child.stdout.on('data', (d) => { out += d; });
@@ -297,7 +308,7 @@ async function step() {
         const re = code === 0 && result ? `(답장을 못 남겨서 대신 적어요) ${result.slice(0, 600)}`
           : noStart ? `${PC} PC에서 클로드를 열지 못해 시작하지 못했어요. 다시 체크해서 다른 PC를 골라 주세요.`
             : `하다가 멈췄어요(코드 ${code}). 다시 체크하면 이어서 할게요.`;
-        patch(id, { run: null, go: null, st: 'seen', re, rat: Date.now(), ...(noStart ? {} : { sid, spc: PC }) });
+        patch(id, { run: null, go: null, st: 'seen', re, rat: Date.now(), rep: Date.now(), ...(noStart ? {} : { sid, spc: PC }) });
       } else if (after) patch(id, { sid, spc: PC });
     } catch (e) { log(`${id} 마무리 쓰기 실패: ${e.message.slice(0, 160)}`); }
     if (ONCE) process.exit(0);
