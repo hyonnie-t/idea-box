@@ -416,3 +416,6 @@ html:has(dialog[open]) { overflow: hidden; }
 .ghelp a { color: var(--sky-t); font-weight: 700; }
 .group .gbody > .ghelp + .rows { border-top: 1px dashed var(--line); }
 @media (min-width: 1024px) { .turn { margin-top: 0; } }
+/* 폰: 거르기 칩 5개를 두 줄로(옆으로 밀어야만 보이던 «끝남·전체»), 접힌 묶음의 🔥 수 */
+@media (max-width: 599px) { .bar { flex-wrap: wrap; overflow-x: visible; } }
+.ghot { color: var(--hot-t); font-weight: 700; }

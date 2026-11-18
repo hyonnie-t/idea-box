@@ -178,7 +178,7 @@ async function open(s) {
   $('#content').hidden = false;
   $('#signout').hidden = isDemo;
   try {
-    await store.watch((v) => { ideas = buryDeleted(v); gotData = true; if (!isDemo && !store.offline) status(''); render(); flush(); maybeReport(); }, () => status('쪽지를 불러오지 못했어요. 새로고침해 주세요.'));
+    await store.watch((v) => { ideas = buryDeleted(v); gotData = !store.offline; /* 끊긴 채 연 빈 자료로는 처음 접기 기본값을 정하지 않음 */ if (!isDemo && !store.offline) status(''); render(); flush(); maybeReport(); }, () => status('쪽지를 불러오지 못했어요. 새로고침해 주세요.'));
   } catch (e) { status('쪽지를 불러오지 못했어요. 인터넷을 확인해 주세요.'); }
   render();
   flush();
@@ -551,7 +551,8 @@ function render(fresh) {
 function firstFoldDefaults(all) {
   firstFold = false;
   const keep = new Set(['집·이사']);
-  for (const x of all) if (isMine(x)) keep.add(x.src ? ASKS_KEY : groupOf(x.tag).key);
+  // 🔥 급한 쪽지가 든 묶음도 편다(접힌 채 급한 일이 숨지 않게)
+  for (const x of all) if (isMine(x) || (x.hot && x.st !== 'done' && !x.src)) keep.add(x.src ? ASKS_KEY : groupOf(x.tag).key);
   closedGroups = new Set([...GROUPS.map((g) => g.key), ASKS_KEY].filter((k) => !keep.has(k)));
   ls.set(CLOSED, [...closedGroups]);
 }
@@ -561,7 +562,8 @@ function firstFoldDefaults(all) {
 // 누르면 지금과 같은 창: 물을 것은 답 칸(openSrcAnswer), 쪽지는 답하기 창(openReply)
 let turnOpen = false;
 function renderTurn(items) {
-  const rank = (x) => (isAsk(x) ? 0 : isRep(x) ? 1 : 2);
+  // 쪽지에 클로드가 물은 것 → 시킨 일 보고 → 계획 파일 물음(src) → 답장 옴. src 물음은 늘 여러 개라 앞에 두면 보고가 접힌 쪽으로 밀린다.
+  const rank = (x) => (isAsk(x) && !x.src ? 0 : isRep(x) ? 1 : isAsk(x) ? 2 : 3);
   const list = items.filter(isMine).sort((a, b) => rank(a) - rank(b) || (b.rep || b.rat || b.at) - (a.rep || a.rat || a.at));
   const box = $('#turn');
   box.hidden = !list.length;
@@ -669,6 +671,8 @@ const SLOW = 3 * 60e3; // 고른 PC가 이만큼 지나도 안 가져가면 알�
 const LIVE = 150e3; // 켜짐 신호가 이 안에 있으면 켜진 PC
 const isWait = (x) => !!x.run && x.run.n === 'wait' && x.st !== 'done' && !x.pending;
 const isRun = (x) => !!x.run && x.run.n !== 'wait' && x.st !== 'done' && !x.pending;
+// 그 PC에서 지금 하는 중인 일 수(앞 일이 있으면 기다리는 쪽지는 줄 서 있는 것)
+const pcBusy = (pc) => Object.values(ideas).filter((y) => y.run && y.run.n !== 'wait' && y.run.pc === pc && y.st !== 'done').length;
 const isStale = (x) => isRun(x) && Date.now() - (x.run.at || 0) > STALE;
 const isGo = (x) => (!!x.go || isRun(x) || isWait(x)) && x.st !== 'done' && !x.pending;
 // 시킨 일이 끝나 클로드가 보고함(rep = 보고한 때, 실행기·자동 세션이 씀) — 효니가 «끝남으로»·«봤어요»·답하기 전까지
@@ -692,8 +696,8 @@ function renderBoard(found, fresh, everything = found) {
   $('#filters').innerHTML = FILTERS.map(([f, label]) => `<button type="button" class="fchip" data-f="${f}" aria-pressed="${f === filter}">${label} <b>${n(f)}</b></button>`).join('');
   const total = everything.filter(visible).length;
   $('#board-sum').innerHTML = !total ? '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.'
-    : searching ? `<span class="sum-find">🔎 «${esc(query.trim())}» 찾은 것 <b>${pool.filter((x) => passF(filter, x)).length}</b></span>`
-    : '<span class="sum-help">☑ 체크하면 고른 PC에서 클로드가 시작해요. 끝남은 줄을 눌러 «끝남으로».</span>';
+    : searching ? '' // 찾은 수는 아래에서 판에 실제로 그린 줄 수로
+    : '<span class="sum-help">☑ 체크 = 클로드에게 시키기. 줄을 누르면 펼쳐져 고치기·끝남으로가 나와요.</span>';
   // 거르기마다: 줄 목록(todo)과 «끝낸 것»(done). 할 것 = 안 끝난 것 + 끝낸 것은 접어 둠, 끝남·전체 = 끝낸 것을 펴서.
   const take = (list) => {
     const rank = (x) => (isAsk(x) ? 8 : 0) + (isRep(x) ? 4 : 0) + (isGo(x) ? 2 : 0) + (x.hot ? 1 : 0);
@@ -719,6 +723,8 @@ function renderBoard(found, fresh, everything = found) {
   const emptyMsg = searching ? '찾는 말이 들어간 쪽지가 여기엔 없어요.'
     : filter === 'me' ? '지금 내 차례인 쪽지는 없어요 🎉' : filter === 'cl' ? '클로드에게 시킨 일이 없어요.' : filter === 'done' ? '끝낸 쪽지가 없어요.' : '';
   box.innerHTML = show.map((g) => group(g, searching, dday)).join('') || (total && emptyMsg ? `<p class="empty">${emptyMsg}</p>` : '');
+  // 찾는 중엔 끝낸 것도 펴서 보이므로, 찾은 수 = 그린 줄 수
+  if (searching && total) $('#board-sum').innerHTML = `<span class="sum-find">🔎 «${esc(query.trim())}» 찾은 것 <b>${box.querySelectorAll('.trow').length}</b></span>`;
   // 모두 접기/펴기: 보이는 묶음이 둘 이상일 때만
   const keys = show.map((g) => g.key);
   const allClosed = keys.length && keys.every((k) => closedGroups.has(k));
@@ -746,7 +752,10 @@ function group(g, searching = false, dday = null) {
   // 끝남·전체 거르기에선 끝낸 것을 펴서 보여 준다
   const doneOpen = searching || filter === 'done' || filter === 'all' || openDone.has(g.key);
   const house = g.key === '집·이사' && dday != null;
-  const count = g.todo.length ? `남은 <b>${g.todo.length}</b>` : g.done.length ? (filter === 'done' ? `끝낸 <b>${g.done.length}</b>` : '다 끝남') : '아직 없음';
+  // 물을 것은 «답 필요» 수를 따로(답만 했거나 시킨 것과 섞이지 않게), 접힌 묶음엔 🔥 수
+  const nAsk = g.asks ? g.todo.filter((x) => isAsk(x) && !isGo(x)).length : 0;
+  const nHot = closed ? g.todo.filter((x) => x.hot).length : 0;
+  const count = `${nHot ? `<span class="ghot">🔥 ${nHot}</span> ` : ''}${g.todo.length ? `${nAsk ? `답 필요 <b>${nAsk}</b> · ` : ''}남은 <b>${g.todo.length}</b>` : g.done.length ? (filter === 'done' ? `끝낸 <b>${g.done.length}</b>` : '다 끝남') : '아직 없음'}`;
   return `<section class="group${closed ? ' closed' : ''}${g.asks ? ' asks' : ''}${house ? ' house' : ''}" data-tag="${esc(g.key)}">
     <h3><button type="button" class="ghead" data-act="group" aria-expanded="${!closed}" aria-controls="${gid}">
       <span class="gname">${g.ico} ${esc(g.name)}</span>${house ? `<span class="dday" title="전세 만기 ${MOVE_DUE}">만기까지 D-${dday}</span>` : ''}<span class="gcount">${count}</span><span class="caret" aria-hidden="true"></span>
@@ -774,6 +783,8 @@ function row(x) {
   const sub = x.pending ? '<span class="tsub wait">올라가길 기다리는 중</span>'
     : stale ? '<span class="tsub wait">⚠️ 멈춘 것 같아요 — 체크를 풀고 다시 체크해 주세요</span>'
     : running ? `<span class="tsub go">⏳ 클로드가 하는 중 · ${esc(x.run.pc || '')}</span>`
+    // 고른 PC가 앞 일을 하는 중이면 줄 서서 기다리는 것 — 경고 대신 안내(실행기는 한 PC에서 차례로 함, 2026-11-18 효니 말 «이런 식으로 오류나 자꾸»)
+    : isWait(x) && pcBusy(x.run.pc) ? `<span class="tsub go">🤖 시켰어요 · ${esc(x.run.pc || '')}가 앞 일 ${pcBusy(x.run.pc)}개를 끝내면 시작해요</span>`
     : isWait(x) ? (Date.now() - (x.run.at || 0) > SLOW ? `<span class="tsub wait">⚠️ ${esc(x.run.pc || '')}가 아직 안 가져갔어요 — 체크를 풀고 다시 골라 주세요</span>` : `<span class="tsub go">🤖 시켰어요 · ${esc(x.run.pc || '')}에서 곧 시작해요</span>`)
     : go ? '<span class="tsub go">🤖 시켰어요 · 곧 시작해요</span>'
     : isRep(x) && !ask && last ? `<span class="tsub rep">🔔 다 했어요 · ${esc(firstLine(last.x))}</span>`
