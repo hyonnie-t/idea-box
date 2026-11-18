@@ -289,8 +289,11 @@ html:has(dialog[open]) { overflow: hidden; }
   position: fixed; left: 50%; bottom: calc(var(--space-4) + env(safe-area-inset-bottom)); transform: translateX(-50%);
   display: flex; align-items: center; gap: var(--space-3); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
   background: var(--ink); color: var(--bg); border-radius: 999px; font-size: .9rem; z-index: 11; box-shadow: var(--shadow);
-  max-width: calc(100vw - var(--space-5)); animation: rise .25s var(--bounce);
+  width: max-content; max-width: calc(100vw - var(--space-5)); animation: rise .25s var(--bounce);
 }
+.undo span { white-space: nowrap; }
+/* 되돌리기 줄(48px)이 떠 있을 때 나온 토스트는 그 위로 */
+.toast.lift { bottom: calc(var(--space-4) + var(--space-6) + var(--space-2) + env(safe-area-inset-bottom)); }
 .undo button { min-height: 40px; padding: 0 var(--space-3); border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 700; cursor: pointer; white-space: nowrap; }
 
 /* 태블릿 가로·PC: 쓰기 칸과 목록을 두 단으로 */

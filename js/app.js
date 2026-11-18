@@ -421,7 +421,11 @@ function allItems() {
 }
 const pass = (x) => filter === 'all' || (filter === 'open' ? x.st !== 'done' : x.st === filter);
 
+// 새로 넣은 쪽지의 통통 움직임: 넣은 직후 곧바로 다시 그려져도(올리기·실시간 갱신) 0.8초 동안은 계속 붙인다
+let freshMark = null;
 function render(fresh) {
+  if (fresh) freshMark = { id: fresh, t: Date.now() };
+  else if (freshMark && Date.now() - freshMark.t < 800) fresh = freshMark.id;
   const items = allItems();
   const board = view === 'board';
   for (const b of document.querySelectorAll('#views button[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
@@ -446,8 +450,9 @@ function render(fresh) {
 const isAsk = (x) => !!x.ask && x.st !== 'done' && !x.pending;
 const firstLine = (s) => (String(s || '').split('\n').find((l) => l.trim()) || '').trim();
 // 체크·되돌리기 patch(같은 계산을 카드 «끝남으로»·판 체크·되돌리기 줄이 함께 쓴다)
-// 체크하면 «답 필요»도 끈다(끝난 쪽지에 질문이 남지 않게). 되돌리면 둘 다 처음대로.
-function planCheck(x) { return { patch: { st: 'done', ask: null }, undo: { st: x.st === 'done' ? 'seen' : x.st || 'new', ask: x.ask ? true : null } }; }
+// «답 필요»(ask)는 건드리지 않는다: 끝난 쪽지엔 표시가 안 되고, 나중에 «다시 열기»하면 질문이 그대로 돌아온다.
+// (Claude가 inbox.js reply/done을 하면 그때 꺼짐)
+function planCheck(x) { return { patch: { st: 'done' }, undo: { st: x.st === 'done' ? 'seen' : x.st || 'new' } }; }
 function planReopen(x) { return { patch: { st: x.re ? 'seen' : 'new' }, undo: { st: 'done' } }; }
 
 function renderBoard(items, fresh) {
@@ -467,8 +472,16 @@ function renderBoard(items, fresh) {
     return { tag, ico, todo, done };
   }).filter((g) => g.todo.length || g.done.length);
   groups.sort((a, b) => (b.todo.length ? 1 : 0) - (a.todo.length ? 1 : 0));
-  $('#groups').innerHTML = groups.map(group).join('');
-  if (fresh) $('#groups').querySelector(`[data-id="${CSS.escape(fresh)}"]`)?.classList.add('fresh');
+  // 통째로 다시 그려도 키보드 자리를 잃지 않게: 누르던 단추(같은 쪽지·같은 동작 또는 같은 묶음 머리)로 돌려놓는다
+  const a = document.activeElement;
+  const box = $('#groups');
+  const keep = a && box.contains(a) ? { id: a.closest('[data-id]')?.dataset.id, tag: a.closest('.group')?.dataset.tag, act: a.dataset.act } : null;
+  box.innerHTML = groups.map(group).join('');
+  if (keep) {
+    const sel = keep.id ? `[data-id="${CSS.escape(keep.id)}"] [data-act="${keep.act}"]` : `.group[data-tag="${CSS.escape(keep.tag || '')}"] [data-act="${keep.act}"]`;
+    box.querySelector(sel)?.focus({ preventScroll: true });
+  }
+  if (fresh) box.querySelector(`[data-id="${CSS.escape(fresh)}"]`)?.classList.add('fresh');
   fillThumbs($('#groups'));
 }
 function group(g) {
@@ -495,8 +508,10 @@ function row(x) {
   const sub = x.pending ? '<span class="tsub wait">올라가길 기다리는 중</span>'
     : x.re ? `<span class="tsub${ask ? ' ask' : ''}">${ask ? '❓ ' : '클로드: '}${esc(firstLine(x.re))}</span>` : '';
   const marks = `${x.hot && !done ? '<span class="tmark hot" title="급해요">🔥</span>' : ''}${ph.length ? '<span class="tmark" title="사진">📷</span>' : ''}`;
+  // 펼치면 제목 줄이 첫 줄 전체를 보여 주므로, 글은 그 다음 줄부터만
+  const rest = String(x.t || '').replace(/^\s*[^\n]*\n?/, '').replace(/^\s+/, '');
   const more = expanded ? `<div class="tmore">
-      ${x.t ? `<p class="text">${esc(x.t)}</p>` : ''}
+      ${rest ? `<p class="text">${esc(rest)}</p>` : ''}
       ${ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : ''}
       ${x.re ? `<div class="reply${ask ? ' is-ask' : ''}"><span class="who">${ask ? '❓ 클로드가 물어요' : '클로드'}</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : ''}
       <div class="row"><span class="tmeta">${when(x.at)}${x.ed ? ' · 고침' : ''}</span><span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${ask ? '답하기' : '고치기'}</button>`}<button type="button" class="del" data-act="del">지우기</button></span></div>
@@ -701,7 +716,7 @@ function when(ms) {
 }
 function status(msg) { $('#status').textContent = msg; $('#status').hidden = !msg; }
 let tt;
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.toggle('lift', !$('#undo').hidden); /* 되돌리기 줄이 떠 있으면 그 위에 */ t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---------- 새로고침(홈 화면 앱용) ----------
 async function hardRefresh() {
