@@ -123,7 +123,7 @@ function restartIfChanged() {
 
 function fbcli(args) {
   const r = spawnSync(NPX, ['--yes', 'firebase-tools', ...args, '--project', PROJECT], {
-    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, shell: process.platform === 'win32', windowsHide: true, env: { ...process.env, MSYS_NO_PATHCONV: '1' },
+    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, shell: process.platform === 'win32', windowsHide: true, timeout: 90000, env: { ...process.env, MSYS_NO_PATHCONV: '1' }, // 멈춘 firebase 명령이 실행기 전체를 세우지 않게
   });
   if (r.status !== 0) throw new Error((r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' '));
   return r.stdout;
