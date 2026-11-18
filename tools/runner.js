@@ -41,15 +41,57 @@ function log(msg) {
   try { fs.mkdirSync(LOG_DIR, { recursive: true }); fs.appendFileSync(path.join(LOG_DIR, `${d.toISOString().slice(0, 10)}_${PC}.log`), line + '\n'); } catch (e) {} // PC마다 따로(OneDrive 충돌 사본 막기)
 }
 
-// 한 PC에 실행기는 하나만(잠금 파일의 pid가 살아 있으면 끝)
+// 한 PC에 실행기는 하나만. 잠금 파일은 «없을 때만 만들기»(wx)로 잡는다 — 읽고 나서 쓰면 같은 순간에 켜진 둘이 다 잡는다
+// (2026-11-18 학교 PC: 같은 초에 둘이 켜져, 하나가 연 일을 다른 하나가 «멈췄어요»로 꺼 버림).
+// 잠금이 살아 있다 = 그 pid가 살아 있고 5분 안에 손댄 흔적이 있다(실행기는 1분마다 잠금 파일 시각을 새로 찍는다).
+// pid만 보면 재부팅 뒤 같은 번호를 다른 프로그램이 쓰고 있을 때 실행기가 영영 안 켜진다.
 const LOCK = path.join(os.tmpdir(), 'ideabox-runner.lock');
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+const lockPid = () => { try { return Number(fs.readFileSync(LOCK, 'utf8')) || 0; } catch (e) { return 0; } };
 function takeLock() {
+  for (let i = 0; i < 2; i++) {
+    try { fs.writeFileSync(LOCK, String(process.pid), { flag: 'wx' }); return true; } catch (e) {}
+    const pid = lockPid();
+    if (pid === process.pid) return true;
+    let fresh = false;
+    try { fresh = Date.now() - fs.statSync(LOCK).mtimeMs < 5 * 60e3; } catch (e) {}
+    if (pid && fresh && alive(pid)) return false;
+    try { fs.rmSync(LOCK, { force: true }); } catch (e) {}
+  }
+  return false;
+}
+const touchLock = () => { try { const t = new Date(); fs.utimesSync(LOCK, t, t); } catch (e) {} };
+
+// 이 PC를 효니가 마지막으로 만진 지 몇 ms(Windows만, 못 재면 0 = 쓰는 중으로 봄)
+function idleMs() {
+  if (process.platform !== 'win32') return 0;
+  const ps = `Add-Type @'
+using System;using System.Runtime.InteropServices;
+public class IdleT{[StructLayout(LayoutKind.Sequential)]public struct L{public uint s;public uint t;}
+[DllImport("user32.dll")]public static extern bool GetLastInputInfo(ref L l);
+public static uint Ms(){L l=new L();l.s=(uint)Marshal.SizeOf(l);GetLastInputInfo(ref l);return (uint)Environment.TickCount-l.t;}}
+'@
+[IdleT]::Ms()`;
   try {
-    const pid = Number(fs.readFileSync(LOCK, 'utf8'));
-    if (pid && pid !== process.pid) { try { process.kill(pid, 0); return false; } catch (e) {} }
-  } catch (e) {}
-  fs.writeFileSync(LOCK, String(process.pid));
-  return true;
+    const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, timeout: 20000 });
+    const n = Number((r.stdout || '').trim().split(/\s+/).pop());
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch (e) { return 0; }
+}
+const IDLE = 5 * 60e3; // 이만큼 안 만졌으면 «쉬는 PC»
+const YIELD = 90e3; // 쉬는 PC가 쓰는 PC에 양보하는 시간(쓰는 PC가 1분 뒤에야 볼 수도 있고, 표를 쓰기까지 20~30초 걸림)
+
+// 실행기 파일이 바뀌면(OneDrive로 새 판이 옴) 일이 없을 때 스스로 새 판으로 다시 켠다 — 한번 켜지면 며칠씩 도는 프로그램이라
+const SELF_M = (() => { try { return fs.statSync(__filename).mtimeMs; } catch (e) { return 0; } })();
+function restartIfChanged() {
+  let m = SELF_M;
+  try { m = fs.statSync(__filename).mtimeMs; } catch (e) { return; }
+  if (m === SELF_M || Date.now() - m < 60e3) return; // 막 바뀐 파일은 다 내려올 때까지 한 번 더 기다림
+  if (spawnSync(process.execPath, ['--check', __filename], { windowsHide: true }).status !== 0) return; // 덜 내려온 파일이면 그대로 돈다
+  log('실행기 파일이 바뀌어 새 판으로 다시 켬');
+  try { fs.rmSync(LOCK, { force: true }); } catch (e) {}
+  spawn(process.execPath, [__filename], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  process.exit(0);
 }
 
 function fbcli(args) {
@@ -86,8 +128,11 @@ function prompt(id, resumed) {
 }
 
 let busy = false;
+let myN = ''; // 이 실행기가 지금 돌리는 일의 표
 async function tick() {
+  if (!DRY) touchLock();
   if (busy) return;
+  if (!ONCE && !DRY) { if (lockPid() !== process.pid) { log('잠금이 다른 실행기 것이라 끝냄'); process.exit(0); } restartIfChanged(); }
   busy = true; // 읽기·가져가기 동안 다음 tick이 끼어들지 않게. 세션을 열면 끝날 때 풂
   let started = false;
   try { started = await step(); } finally { if (!started) busy = false; }
@@ -98,7 +143,9 @@ async function step() {
   const now = Date.now();
   // 이 PC가 맡았는데 지금 안 돌고 있는 일(실행기·PC가 꺼졌다 켜짐) → 멈췄다고 알리고 내려놓기
   for (const [id, x] of Object.entries(all)) {
-    const stale = x.run && (x.run.pc === PC || now - (x.run.at || 0) > STALE);
+    // 이 PC 것: 내가 돌리는 일도 아니고, 그 일을 연 실행기(run.rp)도 죽었을 때만. 다른 PC 것: 4시간 넘었을 때
+    const mineDead = x.run && x.run.pc === PC && x.run.n !== myN && !(x.run.rp && x.run.rp !== process.pid && alive(x.run.rp));
+    const stale = x.run && (x.run.pc === PC ? mineDead : now - (x.run.at || 0) > STALE);
     if (stale && x.st !== 'done' && !DRY) {
       log(`${id} 멈춘 일 내려놓음(맡은 PC ${x.run.pc})`);
       try { patch(id, { run: null, go: null, st: 'seen', re: `중간에 멈췄어요(${x.run.pc} PC가 꺼졌거나 끊김). 다시 체크하면 다시 할게요.`, rat: now }); } catch (e) {}
@@ -113,10 +160,15 @@ async function step() {
   const resume = x.sid && x.spc === PC;
   const sid = resume ? x.sid : crypto.randomUUID();
   try {
+    // 쓰는 PC 먼저(2026-11-18, 출처: 효니 말 «학교 PC로 갔다는데 왜 글로 가?»): 효니가 5분 넘게 안 만진 PC는 90초 기다렸다가 본다.
+    // 그 사이 효니가 쓰고 있는 PC가 가져가면 아래 «그새 바뀜»으로 물러난다. 쓰는 PC가 없으면 쉬는 PC가 한다.
+    const idle = idleMs();
+    if (idle > IDLE) { log(`${id} 이 PC는 쉬는 중(${Math.round(idle / 60e3)}분) — 쓰는 PC에 90초 양보`); await sleep(YIELD); }
     const pre = readOne(id); // 쓰기 직전에 한 번 더: 그새 다른 PC가 가져갔으면 손대지 않음
     if (!pre || pre.run || !pre.go || pre.st === 'done') { log(`${id} 그새 바뀜 — 건너뜀`); return; }
     // st new → seen: 받아 두기(ideabox-collect)가 «새 쪽지»로 보고 reply로 덮지 않게
-    patch(id, { run: { pc: PC, at: Date.now(), n, sid }, ...(pre.st === 'new' ? { st: 'seen' } : {}) });
+    myN = n;
+    patch(id, { run: { pc: PC, at: Date.now(), n, sid, rp: process.pid }, ...(pre.st === 'new' ? { st: 'seen' } : {}) });
     await sleep(10000 + Math.random() * 5000);
     const back = readOne(id);
     if (!back || back.run?.n !== n) { log(`${id} 다른 PC가 가져감`); return; }
@@ -136,6 +188,7 @@ async function step() {
   child.on('close', (code) => {
     clearTimeout(killer);
     busy = false;
+    myN = '';
     let result = '';
     try { result = JSON.parse(out).result || ''; } catch (e) { result = out.trim().slice(-400); }
     log(`${id} 끝(코드 ${code})${err ? ' 오류: ' + err.trim().slice(-200) : ''}`);
@@ -156,6 +209,7 @@ async function step() {
 
 (async () => {
   if (!DRY && !takeLock()) { if (ONCE) console.log('이 PC에서 실행기가 이미 돌고 있어요'); return; } // 이미 도는 중
+  if (!DRY) { await sleep(400 + Math.random() * 600); if (lockPid() !== process.pid) return; } // 같은 순간에 켜진 다른 실행기가 잠금을 가져갔으면 물러남
   log(`실행기 켜짐 (${ROOT})`);
   await tick();
   if (ONCE || DRY) { if (!busy) process.exit(0); return; }
