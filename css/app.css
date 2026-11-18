@@ -207,6 +207,16 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
 .pc.off { background: transparent; border-color: var(--line); color: var(--soft); cursor: default; }
 .pc.off .pc-st { color: var(--soft); }
 @media (prefers-reduced-motion: reduce) { .pc { transition: none; } }
+/* «클로드가 다 했어요» 보고 창: 쪽지마다 첫 줄 · 클로드 답장 · 단추 셋(높이 40) */
+.rep-list { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: grid; gap: var(--space-3); max-height: 60vh; overflow: auto; }
+.rep-item { border: 1px solid var(--line); border-radius: var(--radius); padding: var(--space-3); display: grid; gap: var(--space-2); }
+.rep-t { font-weight: 700; overflow-wrap: anywhere; }
+.rep-re { background: var(--mint-soft); border-radius: 8px; padding: var(--space-2) var(--space-3); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; max-height: 40vh; overflow: auto; }
+.rep-acts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.rep-acts button { min-height: 40px; }
+.repmark { background: var(--sky-soft); color: var(--sky-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
+.tsub.rep { color: var(--sky-t); font-weight: 700; }
+.sum-rep b { color: var(--sky-t); }
 html:has(dialog[open]) { overflow: hidden; }
 
 .toast {

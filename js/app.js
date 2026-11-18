@@ -58,6 +58,8 @@ function demoStore() {
     d5: { t: '시간표 위젯 글씨가 작아\n폰에서 보면 한눈에 안 들어와', at: now - 86400e3 * 4, tag: '시간표', st: 'seen', re: '좋아요. 18px로 키워 두고 작업 현황에 올렸어요.', rat: now - 86400e3 * 2,
       th: { m1: { w: 'c', x: '얼마나 키울까요? [16px / 18px / 20px]', at: now - 86400e3 * 3, q: true }, m2: { w: 'h', x: '18px', at: now - 86400e3 * 2.5 }, m3: { w: 'c', x: '좋아요. 18px로 키워 두고 작업 현황에 올렸어요.', at: now - 86400e3 * 2 } }, hat: now - 86400e3 * 2.5 },
     d8: { t: '책장 앱 검색창 글씨 크기 키워 줘', at: now - 3600e3 * 3, tag: '책장', st: 'seen', go: now - 600e3, run: { pc: 'CHAN', at: now - 300e3 } },
+    // 시킨 일이 끝나 보고한 것(rep) — 열면 «🔔 클로드가 다 했어요» 창
+    d10: { t: '전세 대출 최대 한도 계산해 줘', at: now - 3600e3 * 7, tag: '일반', st: 'seen', rep: now - 120e3, sid: 'demo', spc: 'CHAN', re: '최대 3억 2천만 원까지 가능해요.\n① 은행 전세대출 2억 4천\n② 공제회 신용대출 8천\n계산 파일: 클로드작업/산출물/개인생활/전세한도.md', rat: now - 120e3 },
     d6: { t: '쪽지함 도구 정리', at: now - 86400e3 * 6, tag: '도구', st: 'done', re: '정리했어요.', rat: now - 86400e3 * 5 },
     // «효니에게 물을 것»(src, tools/asks.js가 계획·작업 목록에서 올림) — 판 맨 위 칸
     qa1: { t: '책장 실물 책등을 기본 보기로 할지', at: now - 3600e3, tag: '도구', st: 'seen', ask: true, src: { f: '웹앱/bookshelf/TODO.md', l: 'bookshelf 작업 목록', d: '실물 책등이 기본, 색 에디션 창에서 바꿀 수 있음' } },
@@ -151,7 +153,7 @@ async function open(s) {
   $('#content').hidden = false;
   $('#signout').hidden = isDemo;
   try {
-    await store.watch((v) => { ideas = buryDeleted(v); if (!isDemo && !store.offline) status(''); render(); flush(); }, () => status('쪽지를 불러오지 못했어요. 새로고침해 주세요.'));
+    await store.watch((v) => { ideas = buryDeleted(v); if (!isDemo && !store.offline) status(''); render(); flush(); maybeReport(); }, () => status('쪽지를 불러오지 못했어요. 새로고침해 주세요.'));
   } catch (e) { status('쪽지를 불러오지 못했어요. 인터넷을 확인해 주세요.'); }
   render();
   flush();
@@ -189,6 +191,12 @@ function bind() {
   $('#groups').addEventListener('click', onBoardClick);
   $('#groups').addEventListener('change', onBoardCheck);
   $('#undo-btn').addEventListener('click', doUndo);
+  // 보고 창: 단추 · «나중에»(Esc·바깥 포함)는 지금 보고들을 이 화면에서만 덮어 둠 · 다른 창이 닫히면 기다리던 보고를 띄움
+  $('#rep-list').addEventListener('click', onReportAct);
+  $('#rep').addEventListener('close', () => { for (const x of repItems()) repLater.set(x.id, x.rep); });
+  $('#rep-later').addEventListener('click', () => $('#rep').close());
+  for (const d of document.querySelectorAll('dialog')) if (d.id !== 'rep') d.addEventListener('close', () => setTimeout(maybeReport, 300));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') repLater.clear(); else maybeReport(); });
   $('#filters').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-f]');
     if (!b) return;
@@ -545,7 +553,8 @@ function threadHtml(x) {
 // «답 필요»(ask)는 건드리지 않는다: 끝난 쪽지엔 표시가 안 되고, 나중에 «다시 열기»하면 질문이 그대로 돌아온다.
 // (Claude가 inbox.js reply/done을 하면 그때 꺼짐)
 // 고른 PC가 아직 안 가져간 쪽지(run.n 'wait')를 끝내면 그 예약도 같이 지운다(끝난 쪽지를 실행기가 붙들지 않게). 하는 중인 run은 실행기가 정리한다.
-function planCheck(x) { const w = isWait(x); return { patch: { st: 'done', go: null, ...(w ? { run: null } : {}) }, undo: { st: x.st === 'done' ? 'seen' : x.st || 'new', go: x.go || null, ...(w ? { run: x.run } : {}) } }; }
+// 끝내면 «다 했어요» 보고(rep)도 같이 지운다(되돌리면 복원).
+function planCheck(x) { const w = isWait(x); return { patch: { st: 'done', go: null, rep: null, ...(w ? { run: null } : {}) }, undo: { st: x.st === 'done' ? 'seen' : x.st || 'new', go: x.go || null, rep: x.rep || null, ...(w ? { run: x.run } : {}) } }; }
 // 다시 열 때 남은 go·run은 지운다(글감 옮기기 등 바깥에서 끝남이 된 쪽지를 열자마자 실행기가 시작하지 않게)
 function planReopen(x) { return { patch: { st: x.re ? 'seen' : 'new', go: null, run: null }, undo: { st: 'done', go: x.go || null, run: x.run || null } }; }
 // 클로드에게 시키기(2026-11-18): 판에서 안 끝난 쪽지를 체크하면 go(시킨 때)를 쓰고, PC 실행기(tools/runner.js)가 가져가 run {pc, at}을 쓴다.
@@ -559,6 +568,15 @@ const isWait = (x) => !!x.run && x.run.n === 'wait' && x.st !== 'done' && !x.pen
 const isRun = (x) => !!x.run && x.run.n !== 'wait' && x.st !== 'done' && !x.pending;
 const isStale = (x) => isRun(x) && Date.now() - (x.run.at || 0) > STALE;
 const isGo = (x) => (!!x.go || isRun(x) || isWait(x)) && x.st !== 'done' && !x.pending;
+// 시킨 일이 끝나 클로드가 보고함(rep = 보고한 때, 실행기·자동 세션이 씀) — 효니가 «끝남으로»·«봤어요»·답하기 전까지
+const isRep = (x) => !!x.rep && x.st !== 'done' && !x.pending && !isGo(x);
+// 시킨 일 중에 클로드가 물은 것(again)에 답하면 하던 PC(spc)에서 이어서 하게 다시 시킨다.
+// 하던 PC를 모르면 시키지 않는다 — PC를 안 고른 시키기는 실행기가 받지 않으므로(2026-11-18, 출처: 효니 말 «나한테 안 물어보던데»)
+const PICK_AGAIN = '답을 넣었어요. 이어서 시키려면 체크해서 PC를 골라 주세요';
+function rego(cur, now) {
+  if (!cur.again) return {};
+  return cur.spc ? { go: now, again: null, run: { pc: cur.spc, at: now, n: 'wait' } } : { again: null };
+}
 function planGo(x, pc) { const now = Date.now(); return { patch: { go: now, again: null, run: { pc, at: now, n: 'wait' } }, undo: { go: null, again: x.again || null, run: null } }; }
 function planStop(x) { return { patch: { go: null, run: null }, undo: { go: x.go || null, run: x.run || null } }; }
 
@@ -571,14 +589,15 @@ function renderBoard(everything, fresh) {
   const nAsk = open.filter(isAsk).length;
   const nHot = open.filter((x) => x.hot).length;
   const nGo = open.filter(isGo).length;
+  const nRep = open.filter((x) => isRep(x) && !isAsk(x)).length;
   $('#board-sum').innerHTML = items.length || asks.length
-    ? `남은 일 <b>${open.length}</b>${nAsk ? ` · <span class="sum-ask">❓ 답 필요 <b>${nAsk}</b></span>` : ''}${nHot ? ` · <span class="sum-hot">🔥 급해요 <b>${nHot}</b></span>` : ''}${nGo ? ` · <span class="sum-go">🤖 시킨 일 <b>${nGo}</b></span>` : ''}<br><span class="sum-help">체크하면 어느 PC에서 할지 물어봐요. 고른 PC에서 클로드가 시작하고, 다 하면 답장이 달려요.</span>`
+    ? `남은 일 <b>${open.length}</b>${nRep ? ` · <span class="sum-rep">🔔 확인할 것 <b>${nRep}</b></span>` : ''}${nAsk ? ` · <span class="sum-ask">❓ 답 필요 <b>${nAsk}</b></span>` : ''}${nHot ? ` · <span class="sum-hot">🔥 급해요 <b>${nHot}</b></span>` : ''}${nGo ? ` · <span class="sum-go">🤖 시킨 일 <b>${nGo}</b></span>` : ''}<br><span class="sum-help">체크하면 어느 PC에서 할지 물어봐요. 고른 PC에서 클로드가 시작하고, 다 하면 답장이 달려요.</span>`
     : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
   // 묶음: 주제 순서대로, 남은 일이 있는 묶음 먼저. 모르는 주제는 «일반»에.
   const known = new Set(TAGS.map(([t]) => t));
   const groups = TAGS.map(([tag, ico]) => {
     const all = items.filter((x) => (known.has(x.tag) ? x.tag : '일반') === tag);
-    const rank = (x) => (isAsk(x) ? 4 : 0) + (isGo(x) ? 2 : 0) + (x.hot ? 1 : 0);
+    const rank = (x) => (isAsk(x) ? 8 : 0) + (isRep(x) ? 4 : 0) + (isGo(x) ? 2 : 0) + (x.hot ? 1 : 0);
     const todo = all.filter((x) => x.st !== 'done').sort((a, b) => rank(b) - rank(a) || b.at - a.at);
     const done = all.filter((x) => x.st === 'done').sort((a, b) => (b.rat || b.at) - (a.rat || a.at));
     return { tag, ico, todo, done };
@@ -646,6 +665,7 @@ function row(x) {
     : running ? `<span class="tsub go">⏳ 클로드가 하는 중 · ${esc(x.run.pc || '')}</span>`
     : isWait(x) ? (Date.now() - (x.run.at || 0) > SLOW ? `<span class="tsub wait">⚠️ ${esc(x.run.pc || '')}가 아직 안 가져갔어요 — 체크를 풀고 다시 골라 주세요</span>` : `<span class="tsub go">🤖 시켰어요 · ${esc(x.run.pc || '')}에서 곧 시작해요</span>`)
     : go ? '<span class="tsub go">🤖 시켰어요 · 곧 시작해요</span>'
+    : isRep(x) && !ask && last ? `<span class="tsub rep">🔔 다 했어요 · ${esc(firstLine(last.x))}</span>`
     // 물을 것: 출처와 «답이 없으면», 답했으면 내 답(클로드가 덧붙여 물었으면 그 물음)
     : x.src && !(ask && x.re) ? (x.a ? `<span class="tsub">✍️ 내 답: ${esc(firstLine(x.a))}</span>`
       : `<span class="tsub src">📌 ${esc(x.src.l || '')}${x.src.d ? ` · 답이 없으면 ${esc(x.src.d)}` : ''}</span>`)
@@ -760,7 +780,7 @@ function card(x) {
   const pics = ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : '';
   const doneBtn = x.st === 'done' ? '<button type="button" data-act="reopen">다시 열기</button>' : '<button type="button" data-act="done">끝남으로</button>';
   return `<li class="card${x.hot && x.st !== 'done' ? ' is-hot' : ''}${x.st === 'done' ? ' is-done' : ''}${shownIds.has(x.id) ? ' show' : ''}" data-id="${esc(x.id)}">
-    <div class="meta"><span class="tag">${ico} ${esc(x.tag || '일반')}</span>${x.hot ? '<span class="hotmark">🔥 급해요</span>' : ''}${ask ? '<span class="askmark">❓ 답 필요</span>' : ''}${isRun(x) ? '<span class="gomark">⏳ 클로드가 하는 중</span>' : isWait(x) ? `<span class="gomark">🤖 시킴 · ${esc(x.run.pc || '')}</span>` : isGo(x) ? '<span class="gomark">🤖 시킴</span>' : ''}<time>${when(x.at)}${x.ed ? ' · 고침' : ''}</time></div>
+    <div class="meta"><span class="tag">${ico} ${esc(x.tag || '일반')}</span>${x.hot ? '<span class="hotmark">🔥 급해요</span>' : ''}${ask ? '<span class="askmark">❓ 답 필요</span>' : isRep(x) ? '<span class="repmark">🔔 다 했어요</span>' : ''}${isRun(x) ? '<span class="gomark">⏳ 클로드가 하는 중</span>' : isWait(x) ? `<span class="gomark">🤖 시킴 · ${esc(x.run.pc || '')}</span>` : isGo(x) ? '<span class="gomark">🤖 시킴</span>' : ''}<time>${when(x.at)}${x.ed ? ' · 고침' : ''}</time></div>
     ${x.t ? `<p class="text">${esc(x.t)}</p>` : ''}
     ${pics}
     ${re}
@@ -813,7 +833,7 @@ function openSrcAnswer(id, x) {
   $('#edit-ask .ask-who').textContent = `📌 ${x.src.l || '계획'}에서 물어요`;
   $('#edit-ask-q').textContent = (x.t || '') + (x.src.d ? `\n\n답이 없으면: ${x.src.d}` : '') + (x.ask && x.re ? `\n\n클로드가 덧붙여 물어요: ${x.re}` : '');
   $('#edit-title').textContent = x.a && !x.ask ? '답 고치기' : '물음에 답하기';
-  $('#edit-ask .ask-help').textContent = x.again ? '저장하면 계획 파일에 적히고 클로드가 바로 이어서 해요.'
+  $('#edit-ask .ask-help').textContent = x.again && x.spc ? '저장하면 계획 파일에 적히고 클로드가 바로 이어서 해요.'
     : '저장하면 그 계획 파일에 날짜와 함께 적혀요. 클로드가 바로 하게 하려면 판에서 체크해 주세요.';
   editGen++;
   editPics = [];
@@ -830,12 +850,12 @@ async function saveAnswer() {
   $('#edit').close();
   editing = null;
   if (a === (cur.a || '') && !cur.ask) return toast('바뀐 게 없어요');
-  const part = { a, aat: Date.now(), ask: null };
+  const part = { a, aat: Date.now(), ask: null, rep: null };
   // 시킨 일을 하다 클로드가 덧붙여 물은 것(again)에 답하면 다시 시킨다
-  if (cur.again) { part.go = Date.now(); part.again = null; if (cur.spc) part.run = { pc: cur.spc, at: part.go, n: 'wait' }; } // 하던 PC에서 이어서(PC 고르기)
+  Object.assign(part, rego(cur, part.aat));
   try {
     await withTimeout(store.patch(id, part), 8000);
-    toast(part.go ? '답을 넣었어요. 클로드가 이어서 해요' : '답을 넣었어요. 계획 파일에 적어 둘게요');
+    toast(part.go ? '답을 넣었어요. 클로드가 이어서 해요' : cur.again ? PICK_AGAIN : '답을 넣었어요. 계획 파일에 적어 둘게요');
   } catch (e) { toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
 }
 
@@ -878,8 +898,7 @@ async function saveEdit() {
   // «답 필요» 쪽지에 글·사진을 더했으면 답한 것으로 보고 끈다(위 줄이 «새 쪽지»로 돌려 클로드가 다시 읽음)
   if (cur.ask && cur.st !== 'done' && (t !== (cur.t || '') || picsChanged)) { part.ask = null; part.st = 'new'; }
   // 시킨 일을 하다 클로드가 물은 것(again)에 답하면 다시 시켜 이어서 하게 한다
-  // 하던 PC(spc)를 다시 고른 것으로 적는다(그 PC에 세션이 있어 이어서 할 수 있음). 모르면 예전처럼 먼저 본 PC가.
-  if (part.ask === null && cur.again) { part.go = Date.now(); part.again = null; if (cur.spc) part.run = { pc: cur.spc, at: part.go, n: 'wait' }; }
+  if (part.ask === null) Object.assign(part, { rep: null }, rego(cur, part.ed));
   $('#edit').close();
   editing = null;
   // 순서: 새 사진 올리기 → 쪽지 고치기 → 뺀 사진 지우기(중간에 끊겨도 쪽지가 없는 사진을 가리키지 않게)
@@ -887,7 +906,7 @@ async function saveEdit() {
     await withTimeout(store.putPics(id, Object.fromEntries(added.map((p) => [p.k, { s: p.s, b: p.b }]))), 30000);
     await withTimeout(store.patch(id, part), 8000);
     for (const p of added) thumbs.set(`${id}/${p.k}`, p.s);
-    toast(part.go ? '답을 넣었어요. 클로드가 이어서 해요' : part.ask === null ? '답을 넣었어요. 클로드가 다음에 읽어요' : '고쳤어요');
+    toast(part.go ? '답을 넣었어요. 클로드가 이어서 해요' : part.ask === null && cur.again ? PICK_AGAIN : part.ask === null ? '답을 넣었어요. 클로드가 다음에 읽어요' : '고쳤어요');
   } catch (e) { return toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
   store.dropPics(id, removed).catch(() => {});
 }
@@ -916,6 +935,51 @@ async function pickPc() {
     d.showModal();
     ($('#pick-list button:not([disabled])') || $('#pick-no')).focus();
   });
+}
+
+// ---------- «클로드가 다 했어요» 보고 창 ----------
+// 시킨 일이 끝나면 실행기·자동 세션이 rep(보고한 때)를 찍는다. 앱을 열 때·화면으로 돌아올 때·새 보고가 올 때 이 창을 띄운다.
+// 끝남은 효니가 여기서 정한다(2026-11-18, 출처: 효니 말 «나 확인도 안 했는데 그냥 완료됨으로 넘어가버리는데», «끝나면 나한테 보고를 해줘야 알 거 아냐 팝업을 띄우든지»).
+// «나중에 볼게요»는 이 화면에서만 덮어 두고, 화면을 떠났다 오면 다시 띄운다. 창이 열린 다른 창(고치기·답하기 등)이 있으면 기다린다.
+const repLater = new Map(); // 쪽지 id → 덮어 둔 보고(rep)
+const repItems = () => Object.entries(ideas).map(([id, x]) => ({ ...x, id })).filter((x) => isRep(x) && !isAsk(x) && !x.src && lastClaude(x)).sort((a, b) => a.rep - b.rep);
+function maybeReport() {
+  if (!store || store.offline) return;
+  const d = $('#rep');
+  const list = repItems();
+  if (d.open) return list.length ? fillReport(list) : d.close();
+  if (document.visibilityState !== 'visible' || document.querySelector('dialog[open]')) return;
+  if (!list.some((x) => repLater.get(x.id) !== x.rep)) return;
+  fillReport(list);
+  d.showModal();
+  ($('#rep-list button') || $('#rep-later')).focus();
+}
+function fillReport(list) {
+  $('#rep-list').innerHTML = list.map((x) => `<li class="rep-item" data-rid="${esc(x.id)}">
+    <span class="rep-t">${esc(firstLine(x.t) || '(사진 쪽지)')}</span>
+    <p class="rep-re">${esc(lastClaude(x).x)}</p>
+    <div class="rep-acts"><button type="button" class="text-btn" data-rep="seen">봤어요(안 끝남)</button>${canReply(x) ? '<button type="button" class="text-btn" data-rep="reply">답하기</button>' : ''}<button type="button" class="text-btn" data-rep="done">끝남으로</button></div>
+  </li>`).join('');
+}
+async function onReportAct(e) {
+  const b = e.target.closest('button[data-rep]');
+  if (!b) return;
+  const id = b.closest('[data-rid]').dataset.rid;
+  const x = ideas[id];
+  if (!x) return maybeReport();
+  const act = b.dataset.rep;
+  b.disabled = true;
+  try {
+    if (act === 'done') {
+      const plan = planCheck(x);
+      await withTimeout(store.patch(id, plan.patch), 8000);
+      showUndo('끝남으로 옮겼어요', id, plan.undo);
+    } else if (act === 'reply') {
+      // 보고(rep)는 답을 실제로 보낼 때 지운다(sendReply) — 답하기 창을 그냥 닫아도 🔔이 남게
+      $('#rep').close();
+      openReply(id);
+    } else await withTimeout(store.patch(id, { rep: null }), 8000);
+  } catch (err) { b.disabled = false; toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
 }
 
 // ---------- 답하기 창(스레드) ----------
@@ -954,7 +1018,7 @@ function openReply(id) {
   } else {
     box.innerHTML = `<label class="vh" for="rq-0">답</label><textarea id="rq-0" rows="3" maxlength="4000" placeholder="답을 적어 주세요">${esc(draft.text?.[0] || '')}</textarea>`;
   }
-  $('#reply-help').textContent = `보내면 클로드가 ${x.again ? '바로 이어서 해요' : '다음에 읽어요'}. 원래 쪽지 글은 그대로예요.`;
+  $('#reply-help').textContent = `보내면 ${x.again && x.spc ? `클로드가 ${x.spc}에서 바로 이어서 해요` : x.again ? '답이 저장돼요. 이어서 시키려면 판에서 체크해 PC를 골라 주세요' : '클로드가 다음에 읽어요'}. 원래 쪽지 글은 그대로예요.`;
   $('#reply').showModal();
   for (const t of box.querySelectorAll('textarea')) grow(t);
   // 대화 맨 아래(지금 질문)가 보이게
@@ -999,12 +1063,11 @@ async function sendReply() {
   if (!ideas[id] || ideas[id].st === 'done' || (lastClaude(ideas[id])?.at || 0) !== r.lcAt) { saveReplyDraft(); $('#reply').close(); return toast('그새 쪽지가 바뀌었어요. 다시 열어 확인해 주세요.'); }
   const now = Date.now();
   const k = r.k;
-  const part = { [`th/${k}`]: { w: 'h', x: msg, at: now }, hat: now, st: 'new', ask: null };
+  const part = { [`th/${k}`]: { w: 'h', x: msg, at: now }, hat: now, st: 'new', ask: null, rep: null };
   // 옛 방식 답장(re만 있고 th에 없음)은 같이 th로 옮겨 둔다 — 다음 답장이 re를 덮어도 대화에 남게
   for (const m of threadOf(cur)) if (m.legacy) part[`th/m${(m.at || now).toString(36)}r`] = { w: 'c', x: m.x, at: m.at || now, ...(m.q ? { q: true } : {}) };
   // 시킨 일 중에 물은 것(again)에 답하면 다시 시켜 이어서 하게 한다
-  // 하던 PC(spc)를 다시 고른 것으로 적는다(PC 고르기, saveEdit과 같음). 모르면 먼저 본 PC가.
-  if (cur.again) { part.go = now; part.again = null; if (cur.spc) part.run = { pc: cur.spc, at: now, n: 'wait' }; }
+  Object.assign(part, rego(cur, now));
   const btn = $('#reply-send');
   btn.disabled = true;
   r.sending = true;
@@ -1015,7 +1078,7 @@ async function sendReply() {
     freshMsg = k;
     setTimeout(() => { if (freshMsg === k) freshMsg = null; }, 1500);
     $('#reply').close();
-    toast(part.go ? '답을 보냈어요. 클로드가 이어서 해요' : '답을 보냈어요. 클로드가 다음에 읽어요');
+    toast(part.go ? '답을 보냈어요. 클로드가 이어서 해요' : cur.again ? PICK_AGAIN : '답을 보냈어요. 클로드가 다음에 읽어요');
     render();
   } catch (e) { toast('보내지 못했어요. 다시 눌러도 한 번만 들어가요.'); }
   finally { btn.disabled = false; r.sending = false; }
