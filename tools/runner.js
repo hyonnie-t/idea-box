@@ -6,6 +6,8 @@
 //   node tools/runner.js --once     한 번만 보고 끝(시험용) / --dry 가져가지 않고 무엇을 할지만 출력
 // 쪽지 칸: go 시킨 때(ms, 앱이 씀) · run {pc, at, n, sid} 하는 중(이 실행기가 씀) · sid/spc 마지막 세션 id·PC(이어서 할 때 --resume)
 // 여러 PC가 같이 돌아도 한 번만 하게: run에 내 표(n)를 쓰고 몇 초 뒤 다시 읽어 내 표일 때만 시작한다.
+// «효니에게 물을 것»(2026-11-18): 켜질 때와 10분마다 tools/asks.js로 계획·작업 목록의 물을 것을 올리고 효니 답을 출처 파일에 적는다.
+//   물을 것(src 칸)을 시키면 그 출처 파일에서 이어 가라는 지시문으로 세션을 연다.
 // 한 PC에서 한 번에 하나만 한다. 세션이 답장 없이 끝나면 클로드 마지막 말을 답장으로 남기고 go를 끈다(효니가 다시 체크하면 이어서).
 process.noDeprecation = true;
 const { spawnSync, spawn } = require('child_process');
@@ -125,18 +127,57 @@ function patch(id, part) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const firstLine = (s) => (String(s || '').split('\n').find((l) => l.trim()) || '').trim();
 
-function prompt(id, resumed) {
+// 자동 세션이 하지 않을 일(2026-11-18, 물을 것 붙이기 때 넓힘): 미리보기·초안까지만 하고 ask로 다시 묻는다
+const NO_GO = '지우기(파일·글·쪽지·레포·브랜치)·배포(push·PR 병합·Pages·Apps Script 배포)·학생 기록 등록·학부모·학생 문자·메일 발송·나이스 상신·힉스필드 사용(크레딧)·강제 푸시·결제·공개 게시';
+function prompt(id, resumed, x = {}) {
   const inbox = 'node 웹앱/idea-box/tools/inbox.js';
+  const stop = `되돌리기 어려운 일 — ${NO_GO} — 과 효니만 정할 수 있는 일은 하지 않는다. 미리보기·초안까지 만든 뒤 \`${inbox} ask ${id} "질문(쉬운 말, 고를 것이 있으면 번호로)"\` 로 묻고 끝낸다.`;
+  const tail = [
+    `다 하면 \`${inbox} done ${id} "한 일 한두 줄(쉬운 말, 만든 파일·주소 포함)"\`. 다 못 했으면 \`${inbox} reply ${id} "한 것 · 남은 것"\`. 답장은 효니가 폰에서 읽는다.`,
+    '이 세션은 쪽지함이 연 자동 세션이다: 첫 응답 머릿말·사이드바 정리·결과 보고 페이지는 하지 않고, 결과는 쪽지 답장으로만 남긴다.',
+  ];
+  if (x.src) {
+    // «효니에게 물을 것»(tools/asks.js가 계획·작업 목록에서 올린 항목) — 그 출처 파일에서 이어 간다
+    return [
+      resumed ? `효니가 물을 것 ${id}에 다시 답하고 시켰어요. 이어서 해 주세요.` : `효니가 쪽지함 할 일 판 «❓ 효니에게 물을 것»에서 체크해 클로드에게 시킨 일이에요. 쪽지 id: ${id}`,
+      `출처: ${x.src.l || ''} — 교사업무/${x.src.f}`,
+      '',
+      `1. \`${inbox} show ${id}\` 로 물음·효니 답을 읽는다. 효니 답은 출처 파일의 그 항목 바로 아래 «→ 효니 답(날짜): …» 줄로도 적혀 있다. 답이 없으면 그 항목의 «답이 없으면 ○○»대로 진행한다.`,
+      `2. 출처 파일(교사업무/${x.src.f})을 처음부터 읽고, 그 파일이 가리키는 레포 CLAUDE.md·체크리스트·«새 세션에게»대로 이어서 한다. 효니는 자리에 없다고 보고 묻지 않는다: 되돌릴 수 있는 일은 기본값으로 진행한다. 레포 코드는 worktree에서 고친다.`,
+      `3. ${stop}`,
+      '4. 그 물음이 정해졌으면 출처 파일의 그 항목 첫머리를 ~~줄 긋기~~하고 끝에 « → 정함(YYYY-MM-DD): 무엇으로»를 붙인다(그래야 쪽지함·세션현황판에서 빠진다). 효니가 정한 결정이면 클로드작업/효니위키/도구/결정-기록.md에도 한 줄(출처: 효니 말 «…»).',
+      `5. ${tail[0]}`,
+      `6. ${tail[1]}`,
+    ].join('\n');
+  }
   return [
     resumed ? `효니가 쪽지 ${id}에 답하고 다시 시켰어요. 이어서 해 주세요.` : `효니가 클로드 쪽지함 «할 일 판»에서 체크해 클로드에게 시킨 일이에요. 쪽지 id: ${id}`,
     '',
     `1. \`${inbox} show ${id}\` 로 쪽지 전문(효니 답·앞선 클로드 답장 포함)을 읽는다. 사진 경로가 나오면 Read로 본다.`,
     '2. 교사업무 CLAUDE.md와 관련 레포 CLAUDE.md 규칙대로 끝까지 한다. 효니는 자리에 없다고 보고 묻지 않는다: 되돌릴 수 있는 일은 기본값으로 진행한다.',
-    `3. 학생 기록 등록·문자·메일 발송·나이스 상신·지우기·강제 푸시·결제·공개 게시처럼 되돌리기 어려운 일, 효니만 정할 수 있는 일은 하지 않는다. 미리보기·초안까지 만든 뒤 \`${inbox} ask ${id} "질문(쉬운 말, 고를 것이 있으면 번호로)"\` 로 묻고 끝낸다.`,
-    `4. 다 하면 \`${inbox} done ${id} "한 일 한두 줄(쉬운 말, 만든 파일·주소 포함)"\`. 다 못 했으면 \`${inbox} reply ${id} "한 것 · 남은 것"\`. 답장은 효니가 폰에서 읽는다.`,
-    '6. 이 세션은 쪽지함이 연 자동 세션이다: 첫 응답 머릿말·사이드바 정리·결과 보고 페이지는 하지 않고, 결과는 쪽지 답장으로만 남긴다.',
+    `3. ${stop}`,
+    `4. ${tail[0]}`,
     `5. 클로드작업/작업 현황.md «⏳ 열린 일»에 이 쪽지 id가 든 💌 줄이 있으면 done 때 그 줄을 지운다(여러 id를 묶은 줄이면 이 id만 빼기).`,
+    `6. ${tail[1]}`,
   ].join('\n');
+}
+
+// «효니에게 물을 것» 맞추기(tools/asks.js): 켜질 때 한 번 + 10분마다. 세션이 도는 중에도 따로 돈다.
+const ASK_EVERY = 10 * 60e3;
+let asksBusy = false;
+let lastBlocked = '';
+function asksTick() {
+  if (asksBusy) return;
+  asksBusy = true;
+  try {
+    const asks = require('./asks.js');
+    const s = asks.sync({ dry: DRY });
+    // 바뀐 게 있을 때만 남긴다(거른 항목만 있으면 같은 줄이 10분마다 쌓이지 않게)
+    const line = asks.summary(s);
+    const blockedLine = line.replace(/^.*?(?= · 안 올림|$)/, '');
+    if (s.add || s.close || s.reopen || s.write || s.missing || blockedLine !== lastBlocked || ONCE || DRY) log((DRY ? '(dry) ' : '') + line);
+    lastBlocked = blockedLine;
+  } catch (e) { log('물을 것 맞추기 실패: ' + String(e.message || e).slice(0, 160)); } finally { asksBusy = false; }
 }
 
 let busy = false;
@@ -188,8 +229,9 @@ async function step() {
     if (!back || back.run?.n !== n) { log(`${id} 다른 PC가 가져감`); return; }
     if (!back.go) { log(`${id} 그새 효니가 체크를 풂`); patch(id, { run: null }); return; }
   } catch (e) { myN = ''; log(`${id} 가져가기 실패: ${e.message.slice(0, 160)}`); return; } // myN을 비워야 쓰다 만 내 run을 다음 tick이 내려놓는다
-  log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
-  const args = ['-p', prompt(id, resume), '--permission-mode', 'auto', '--output-format', 'json',
+  // 물을 것이면 효니 답을 출처 파일에 먼저 적어 둔다(10분 맞추기를 기다리지 않게)
+  if (x.src && x.a) { try { log(`${id} 답 적기: ${require('./asks.js').writeOne(id, x)}`); } catch (e) { log(`${id} 답 적기 실패: ${String(e.message || e).slice(0, 160)}`); } }  log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
+  const args = ['-p', prompt(id, resume, x), '--permission-mode', 'auto', '--output-format', 'json',
     '-n', `💌 ${firstLine(x.t).slice(0, 24) || '쪽지 ' + id}`, ...(resume ? ['--resume', sid] : ['--session-id', sid])];
   const child = spawn('claude', args, { cwd: ROOT, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
@@ -226,7 +268,9 @@ async function step() {
   if (!DRY) { await sleep(400 + Math.random() * 600); if (lockPid() !== process.pid) return; } // 같은 순간에 켜진 다른 실행기가 잠금을 가져갔으면 물러남
   if (!DRY && !ONCE) killOldRunners();
   log(`실행기 켜짐 (${ROOT})`);
+  asksTick();
   await tick();
   if (ONCE || DRY) { if (!busy) process.exit(0); return; }
   setInterval(tick, EVERY);
+  setInterval(asksTick, ASK_EVERY);
 })();
