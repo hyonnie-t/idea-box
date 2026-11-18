@@ -165,13 +165,18 @@ function prompt(id, resumed, x = {}) {
 // «효니에게 물을 것» 맞추기(tools/asks.js): 켜질 때 한 번 + 10분마다. 세션이 도는 중에도 따로 돈다.
 const ASK_EVERY = 10 * 60e3;
 let asksBusy = false;
+let lastBlocked = '';
 function asksTick() {
   if (asksBusy) return;
   asksBusy = true;
   try {
     const asks = require('./asks.js');
     const s = asks.sync({ dry: DRY });
-    if (s.add || s.close || s.reopen || s.write || s.missing || s.blocked.length || ONCE || DRY) log((DRY ? '(dry) ' : '') + asks.summary(s));
+    // 바뀐 게 있을 때만 남긴다(거른 항목만 있으면 같은 줄이 10분마다 쌓이지 않게)
+    const line = asks.summary(s);
+    const blockedLine = line.replace(/^.*?(?= · 안 올림|$)/, '');
+    if (s.add || s.close || s.reopen || s.write || s.missing || blockedLine !== lastBlocked || ONCE || DRY) log((DRY ? '(dry) ' : '') + line);
+    lastBlocked = blockedLine;
   } catch (e) { log('물을 것 맞추기 실패: ' + String(e.message || e).slice(0, 160)); } finally { asksBusy = false; }
 }
 

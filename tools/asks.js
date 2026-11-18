@@ -7,7 +7,7 @@
 // 실행기(tools/runner.js)가 켜질 때와 10분마다 부른다. 매 답 끝 훅에서는 부르지 않는다(네트워크가 무거움).
 // 쪽지 칸: id = q + sha1(출처 경로 + 물음) 앞 12자, t 물음, ask, st seen, tag 도구,
 //   src { f 출처 파일(교사업무 기준, / 구분), l 출처 이름, d «답이 없으면 ○○», gone 원본에서 사라져 닫음 },
-//   a 효니 답, aat 답한 때, aw 출처 파일에 적은 때.
+//   a 효니 답, aat 답한 때, aw 출처 파일에 적은 때, awa 적은 답 글(a와 다르면 다시 적음).
 // 학생 실명·열쇠 값처럼 보이는 항목은 올리지 않고 건수와 파일만 알린다(기준: TODO.md, blockedReason).
 process.noDeprecation = true;
 const { spawnSync } = require('child_process');
@@ -33,15 +33,29 @@ const panel = () => require(path.join(ROOT, '클로드작업', '도구', '현황
 // ---------- 거르기 ----------
 const SURNAME = '김이박최정강조윤장임한오서신권황안송류전홍고문양손배백허유남심노하곽성차주우구민진나지엄채원천방공현함변염여추도소석선설마길연위표명기반왕금옥육인맹제모탁국어은편용예경봉사부';
 const NAME = `[${SURNAME}][가-힣]{1,2}(?![가-힣])`; // 흔한 성씨로 시작하는 한글 2~3자
+// 성씨로 시작하지만 이름이 아닌 흔한 말(«전체 학생», «모든 학생», «한국사 학생 활동»이 걸리지 않게)
+const NOT_NAME = new Set(['전체', '모든', '문제', '한국사', '이번', '우리', '일반', '전교', '신입', '재학', '해당', '대상', '담당', '여러', '다른', '우수', '전학', '각반', '반별', '남학', '여학', '고등', '중학', '초등', '이전', '지난', '다음', '나머지', '주인']);
 const BLOCK = [
-  [new RegExp(`\\d+\\s*번\\s*${NAME}`), '번호+이름'],
-  [new RegExp(`(?<![\\d-])\\d{1,2}\\s*[-–]\\s*\\d{1,2}(?![\\d-])\\s*번?\\s*${NAME}`), '반-번호+이름'],
-  [new RegExp(`(?<!\\d)[1-3]\\d{3,4}(?!\\d)\\s*${NAME}`), '학번+이름'],
-  [new RegExp(`[${SURNAME}][가-힣]{1,2}\\s?(학생|(군|양)(?![가-힣]))`), '이름+학생'],
-  [/(비밀번호|비번|password|passwd|token|api[_ -]?key|secret)\s*[:=]\s*\S+/i, '열쇠 값'],
+  [new RegExp(`\\d+\\s*번\\s*${NAME}`, 'g'), '번호+이름'],
+  [new RegExp(`(?<![\\d-])\\d{1,2}\\s*[-–]\\s*\\d{1,2}(?![\\d-])\\s*번?\\s*${NAME}`, 'g'), '반-번호+이름'],
+  [new RegExp(`(?<!\\d)[1-3]\\d{3,4}(?!\\d)\\s*${NAME}`, 'g'), '학번+이름'],
+  [new RegExp(`\\d\\s*학년\\s*\\d+\\s*반\\s*${NAME}`, 'g'), '학년 반+이름'],
+  [new RegExp(`(?<![가-힣])${NAME}\\s*\\(?\\s*\\d{1,2}(\\s*[-–]\\s*\\d{1,2})?\\s*번`, 'g'), '이름+번호'],
+  [new RegExp(`(?<![가-힣])${NAME}\\s*\\(\\s*\\d\\s*[-–]\\s*\\d{1,2}`, 'g'), '이름(반-번호)'],
+  [new RegExp(`(?<![가-힣])([${SURNAME}][가-힣]{1,2})\\s?(학생|(군|양)(?![가-힣]))`, 'g'), '이름+학생'],
+  [/(비밀번호|비번|password|passwd|token|api[_ -]?key|secret)["']?\s*(는|은|[:=])\s*["']?\S+/gi, '열쇠 값'],
+  [/\b(AIza[\w-]{20,}|sk-[\w-]{20,}|gh[pousr]_\w{20,}|xox[bp]-[\w-]{10,})/g, '열쇠 값'],
 ];
+// 걸린 말이 흔한 낱말(NOT_NAME)이면 넘어간다. 그 밖엔 넓게 잡는다(안 올라가는 쪽이 안전)
 function blockedReason(text) {
-  for (const [re, why] of BLOCK) if (re.test(text)) return why;
+  for (const [re, why] of BLOCK) {
+    re.lastIndex = 0;
+    for (const m of text.matchAll(re)) {
+      const word = (m[0].match(/[가-힣]{2,3}/g) || []).find((w) => !/^(학생|학년)$/.test(w)) || '';
+      if (why === '이름+학생' ? NOT_NAME.has(m[1]) : NOT_NAME.has(word)) continue;
+      return why;
+    }
+  }
   return null;
 }
 
@@ -62,11 +76,14 @@ function labelOf(rel) {
   if (rel.endsWith('작업 현황.md')) return '작업 현황';
   return path.basename(rel, '.md').replace(/^\d{4}-\d{2}-\d{2}_/, '').replace(/_?[^_]*계획-인수인계$/, '') + ' 계획';
 }
+// out.bad = 목록엔 있는데 지금 못 읽은 파일(OneDrive 잠김 등). 거기서 온 항목은 «사라짐»으로 닫지 않는다(검토 2026-11-18)
 function collect() {
   const p = panel();
   const out = [];
+  out.bad = new Set();
   for (const abs of p.askFiles()) {
     const rel = path.relative(ROOT, abs).split(path.sep).join('/');
+    try { fs.readFileSync(abs); } catch (e) { out.bad.add(rel); continue; }
     for (const e of p.askEntries(abs)) {
       const { q, d } = splitDefault(e.text);
       out.push({ id: idOf(rel, e.text), rel, abs, l: labelOf(rel), q: q.slice(0, 600), d: d.slice(0, 200), line: e.line, text: e.text, blocked: blockedReason(e.text) });
@@ -78,17 +95,19 @@ function collect() {
 // ---------- 답 적기 ----------
 const ymd = (ms) => { const t = new Date(ms); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
 const answerLine = (x) => `  - → 효니 답(${ymd(x.aat || Date.now())}): ${String(x.a).trim().replace(/\s*\r?\n\s*/g, ' / ')}`;
-// 그 항목을 지금 파일에서 다시 찾아(id가 같은 항목) 바로 아래 들여 쓴 줄들 뒤에 답 줄을 넣는다.
-// 반환: 'written' | 'already'(같은 답 줄이 이미 있음) | 'missing'(항목을 못 찾음)
+// 그 항목을 쓰기 직전에 파일에서 다시 찾아(id가 같은 항목 — 앞서 다른 답 줄이 들어가 줄 번호가 밀렸어도 맞게)
+// 바로 아래 들여 쓴 줄들 뒤에 답 줄을 넣는다. 반환: 'written' | 'already'(같은 답 줄이 이미 있음) | 'missing'(항목을 못 찾음)
 function writeAnswer(x, items, dry) {
   const it = items.find((i) => i.id === x.id);
   if (!it) return 'missing';
+  const now = panel().askEntries(it.abs).find((e) => idOf(it.rel, e.text) === x.id);
+  if (!now) return 'missing';
   let text;
   try { text = fs.readFileSync(it.abs, 'utf8'); } catch (e) { return 'missing'; }
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const lines = text.split(/\r?\n/);
   const line = answerLine(x);
-  let at = it.line + 1;
+  let at = now.line + 1;
   while (at < lines.length && /^\s+\S/.test(lines[at])) { if (lines[at].trim() === line.trim()) return 'already'; at++; }
   if (dry) return 'written';
   lines.splice(at, 0, line);
@@ -116,20 +135,23 @@ function plan(all, items, dry) {
       sum.reopen++;
     }
   }
+  const bad = items.bad || new Set();
   for (const [id, x] of Object.entries(all)) {
     if (!x || !x.src || x.st === 'done') continue;
     if (!live.has(id)) {
       if (x.run) continue; // 세션이 그 일을 하는 중이면 세션이 닫는다
+      // 읽기 실패한 파일이거나 아무 항목도 못 모았으면(OneDrive 끊김 등) 닫지 않는다 — 시킴(go)이 조용히 풀리지 않게
+      if (bad.has(x.src.f) || !items.length) { sum.open++; continue; }
       Object.assign(up, { [`${id}/st`]: 'done', [`${id}/src/gone`]: true, [`${id}/ask`]: null, [`${id}/go`]: null,
         [`${id}/re`]: x.a && !x.aw ? `원본 항목이 바뀌거나 정해져서 닫았어요. 답(«${String(x.a).slice(0, 80)}»)은 파일에 적지 못했어요.` : '원본 파일에서 정해졌거나 지워져서 닫았어요.', [`${id}/rat`]: now });
       sum.close++;
       continue;
     }
-    // 효니가 답했는데 아직 파일에 안 적음(또는 답을 고침)
-    if (x.a && (!x.aw || (x.aat || 0) > x.aw)) {
+    // 효니가 답했는데 아직 파일에 안 적음(또는 답을 고침). 시계(aat·aw)가 아니라 적은 글(awa)과 비교 — 폰·PC 시계가 달라도 맞게
+    if (x.a && x.a !== x.awa) {
       const r = writeAnswer({ id, ...x }, items, dry);
       if (r === 'missing') sum.missing++;
-      else { up[`${id}/aw`] = now; if (r === 'written') sum.write++; }
+      else { up[`${id}/aw`] = now; up[`${id}/awa`] = x.a; if (r === 'written') sum.write++; }
     }
     sum.open++;
     if (x.a && !x.go && !x.run) sum.answered++;
@@ -166,7 +188,7 @@ function sync({ all, dry = false } = {}) {
 function writeOne(id, x) {
   if (!x || !x.src || !x.a) return 'none';
   const r = writeAnswer({ id, ...x }, collect(), false);
-  if (r !== 'missing') pushUpdates({ [`${id}/aw`]: Date.now() });
+  if (r !== 'missing') pushUpdates({ [`${id}/aw`]: Date.now(), [`${id}/awa`]: x.a });
   return r;
 }
 const summary = (s) => `물을 것: 열림 ${s.open + s.add} · 새로 올림 ${s.add} · 닫음 ${s.close}${s.reopen ? ` · 다시 엶 ${s.reopen}` : ''} · 답 적음 ${s.write}${s.missing ? ` · 못 적음 ${s.missing}` : ''}`

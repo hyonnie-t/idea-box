@@ -483,10 +483,11 @@ function renderBoard(everything, fresh) {
   // 물을 것(src)은 맨 위 칸에만, 끝난 것은 안 보임(원본 파일이 기록)
   const asks = everything.filter((x) => x.src && x.st !== 'done');
   const items = everything.filter((x) => !x.src);
-  const open = items.filter((x) => x.st !== 'done');
-  const nAsk = open.filter(isAsk).length + asks.filter(isAsk).length;
+  // 남은 일·답 필요·시킨 일 모두 물을 것까지 같이 센다(숫자끼리 어긋나지 않게)
+  const open = [...items.filter((x) => x.st !== 'done'), ...asks];
+  const nAsk = open.filter(isAsk).length;
   const nHot = open.filter((x) => x.hot).length;
-  const nGo = open.filter(isGo).length + asks.filter(isGo).length;
+  const nGo = open.filter(isGo).length;
   $('#board-sum').innerHTML = items.length || asks.length
     ? `남은 일 <b>${open.length}</b>${nAsk ? ` · <span class="sum-ask">❓ 답 필요 <b>${nAsk}</b></span>` : ''}${nHot ? ` · <span class="sum-hot">🔥 급해요 <b>${nHot}</b></span>` : ''}${nGo ? ` · <span class="sum-go">🤖 시킨 일 <b>${nGo}</b></span>` : ''}<br><span class="sum-help">체크하면 클로드가 바로 시작해요(PC가 켜져 있을 때). 다 하면 답장이 달려요.</span>`
     : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
@@ -576,7 +577,7 @@ function row(x) {
       ${src}
       ${ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : ''}
       ${x.re ? `<div class="reply${ask ? ' is-ask' : ''}"><span class="who">${ask ? '❓ 클로드가 물어요' : '클로드'}</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : ''}
-      <div class="row"><span class="tmeta">${when(x.at)}${x.ed ? ' · 고침' : ''}</span><span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${editLabel}</button>${done ? '' : '<button type="button" data-act="done">끝남으로</button>'}`}${x.src ? '' : '<button type="button" class="del" data-act="del">지우기</button>'}</span></div>
+      <div class="row"><span class="tmeta">${when(x.at)}${x.ed ? ' · 고침' : ''}</span><span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${editLabel}</button>${done || x.src ? '' : '<button type="button" data-act="done">끝남으로</button>'}`}${x.src ? '' : '<button type="button" class="del" data-act="del">지우기</button>'}</span></div>
     </div>` : '';
   return `<li class="trow${done ? ' is-done' : ''}${go ? ' is-go' : ''}${ask ? ' is-ask' : ''}${x.hot && !done ? ' is-hot' : ''}${expanded ? ' open' : ''}" data-id="${esc(x.id)}">
     ${done ? `<label class="tcheck"><input type="checkbox" data-act="check" checked><span class="vh">끝남 — 풀면 다시 열어요: ${esc(title)}</span></label>`
