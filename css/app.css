@@ -309,3 +309,11 @@ html:has(dialog[open]) { overflow: hidden; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .card { opacity: 1; transform: none; }
 }
+
+/* 클로드에게 시키기(2026-11-18) */
+.tcheck.go input { accent-color: var(--sky); }
+.tsub.go { color: var(--sky-t); font-weight: 700; }
+.trow.is-go { background: linear-gradient(90deg, var(--sky-soft), transparent 40%); }
+.gomark { background: var(--sky-soft); color: var(--sky-t); border-radius: 999px; padding: var(--space-1) var(--space-2); line-height: 1.2; font-weight: 700; }
+.sum-go b { color: var(--sky-t); }
+.sum-help { display: inline-block; margin-top: var(--space-1); font-size: .85rem; }
