@@ -60,10 +60,20 @@
       </div>
     </form>
 
+    <div class="views" role="group" aria-label="보는 방법" id="views">
+      <button type="button" class="vbtn" data-view="list" aria-pressed="true">💌 쪽지</button>
+      <button type="button" class="vbtn" data-view="board" aria-pressed="false">✅ 할 일 판</button>
+    </div>
+
     <div class="bar" role="group" aria-label="쪽지 거르기" id="filters"></div>
 
     <ol class="list" id="list"></ol>
     <p class="empty" id="empty" hidden></p>
+
+    <section class="board" id="board" hidden aria-label="할 일 판">
+      <p class="board-sum" id="board-sum"></p>
+      <div class="groups" id="groups"></div>
+    </section>
   </div>
 </main>
 
@@ -80,6 +90,11 @@
 <dialog class="sheet" id="edit" aria-labelledby="edit-title">
   <form id="edit-form">
     <h2 id="edit-title">쪽지 고치기</h2>
+    <div class="ask-q" id="edit-ask" hidden>
+      <p class="ask-who">❓ 클로드가 물어요</p>
+      <p class="ask-text" id="edit-ask-q"></p>
+      <p class="ask-help">아래 글 끝에 답을 덧붙이고 저장하면 클로드가 다음에 읽어요.</p>
+    </div>
     <label class="vh" for="edit-t">쪽지 글</label>
     <textarea id="edit-t" rows="6" maxlength="4000"></textarea>
     <div class="pic-strip" id="edit-pics" hidden aria-label="쪽지 사진"></div>
@@ -102,6 +117,7 @@
   <button type="button" class="viewer-close" id="viewer-close" aria-label="닫기">×</button>
 </dialog>
 
+<div class="undo" id="undo" role="status" aria-live="polite" hidden><span id="undo-msg"></span><button type="button" id="undo-btn">되돌리기</button></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
