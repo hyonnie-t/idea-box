@@ -62,6 +62,18 @@ function takeLock() {
 }
 const touchLock = () => { try { const t = new Date(); fs.utimesSync(LOCK, t, t); } catch (e) {} };
 
+// 잠금을 잡은 뒤, 이 PC에 남은 다른 실행기(잠금을 안 보는 2026-11-18 오전 판)를 끈다. 새 판은 잠금이 남의 것이면 스스로 끝나므로
+// 여기서 걸리는 것은 옛 판뿐이다. 옛 판이 살아 있으면 새 판이 연 일을 «멈췄어요»로 꺼 버린다.
+function killOldRunners() {
+  if (process.platform !== 'win32') return;
+  const ps = `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'idea-box.tools.runner\\.js' -and $_.CommandLine -notmatch '--(dry|once)' -and $_.ProcessId -ne ${process.pid} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }`;
+  try {
+    const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+    const ids = (r.stdout || '').trim().split(/\s+/).filter((s) => /^\d+$/.test(s));
+    if (ids.length) log(`옛 실행기 ${ids.length}개 끔(pid ${ids.join(', ')})`);
+  } catch (e) {}
+}
+
 // 이 PC를 효니가 마지막으로 만진 지 몇 ms(Windows만, 못 재면 0 = 쓰는 중으로 봄)
 function idleMs() {
   if (process.platform !== 'win32') return 0;
@@ -144,7 +156,9 @@ async function step() {
   // 이 PC가 맡았는데 지금 안 돌고 있는 일(실행기·PC가 꺼졌다 켜짐) → 멈췄다고 알리고 내려놓기
   for (const [id, x] of Object.entries(all)) {
     // 이 PC 것: 내가 돌리는 일도 아니고, 그 일을 연 실행기(run.rp)도 죽었을 때만. 다른 PC 것: 4시간 넘었을 때
-    const mineDead = x.run && x.run.pc === PC && x.run.n !== myN && !(x.run.rp && x.run.rp !== process.pid && alive(x.run.rp));
+    // (세션 제한 2시간+10분이 넘은 run은 pid가 살아 있어도 멈춘 것 — 재부팅 뒤 같은 pid를 다른 프로그램이 쓸 수 있다)
+    const tooOld = x.run && now - (x.run.at || 0) > LIMIT + 10 * 60e3;
+    const mineDead = x.run && x.run.pc === PC && x.run.n !== myN && (tooOld || !(x.run.rp && x.run.rp !== process.pid && alive(x.run.rp)));
     const stale = x.run && (x.run.pc === PC ? mineDead : now - (x.run.at || 0) > STALE);
     if (stale && x.st !== 'done' && !DRY) {
       log(`${id} 멈춘 일 내려놓음(맡은 PC ${x.run.pc})`);
@@ -173,7 +187,7 @@ async function step() {
     const back = readOne(id);
     if (!back || back.run?.n !== n) { log(`${id} 다른 PC가 가져감`); return; }
     if (!back.go) { log(`${id} 그새 효니가 체크를 풂`); patch(id, { run: null }); return; }
-  } catch (e) { log(`${id} 가져가기 실패: ${e.message.slice(0, 160)}`); return; }
+  } catch (e) { myN = ''; log(`${id} 가져가기 실패: ${e.message.slice(0, 160)}`); return; } // myN을 비워야 쓰다 만 내 run을 다음 tick이 내려놓는다
   log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
   const args = ['-p', prompt(id, resume), '--permission-mode', 'auto', '--output-format', 'json',
     '-n', `💌 ${firstLine(x.t).slice(0, 24) || '쪽지 ' + id}`, ...(resume ? ['--resume', sid] : ['--session-id', sid])];
@@ -210,6 +224,7 @@ async function step() {
 (async () => {
   if (!DRY && !takeLock()) { if (ONCE) console.log('이 PC에서 실행기가 이미 돌고 있어요'); return; } // 이미 도는 중
   if (!DRY) { await sleep(400 + Math.random() * 600); if (lockPid() !== process.pid) return; } // 같은 순간에 켜진 다른 실행기가 잠금을 가져갔으면 물러남
+  if (!DRY && !ONCE) killOldRunners();
   log(`실행기 켜짐 (${ROOT})`);
   await tick();
   if (ONCE || DRY) { if (!busy) process.exit(0); return; }
