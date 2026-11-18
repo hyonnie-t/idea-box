@@ -3,9 +3,13 @@
 //   node tools/inbox.js            안 끝난 쪽지 보기(새 쪽지 먼저). 읽었다고 표시하지는 않는다
 //   node tools/inbox.js --count    숫자만 (새 N · 읽음 N)
 //   node tools/inbox.js --all      끝난 것까지
+//   node tools/inbox.js --done-ids 끝남 쪽지 id만(한 줄에 하나)
 //   node tools/inbox.js seen <id> [<id>…]           «클로드가 읽음»으로
 //   node tools/inbox.js done <id> "답장"             «끝남» + 답장(앱 카드에 말풍선으로 보임)
 //   node tools/inbox.js reply <id> "답장"            답장만 달고 «읽음»으로(아직 할 일이 남았을 때)
+//   node tools/inbox.js ask <id> "질문"              효니에게 물을 것: 답장 칸에 질문 + «답 필요»(ask) 켜기 + «읽음»
+//        효니가 앱에서 «답하기»로 글을 덧붙이면 앱이 ask를 끄고 «새 쪽지»로 돌린다. reply/done도 ask를 끈다.
+//        목록에서 «✍️ 효니가 답장 뒤 고침» 줄 = 답장(rat) 뒤에 효니가 고친(ed) 새 쪽지 → 받아 두기는 «받아 둠» 답장 대신 seen만
 //   node tools/inbox.js pics <id>                    그 쪽지 사진을 내려받아 파일 경로 출력(Read로 열어 보기)
 // 사진이 있는 쪽지는 목록을 볼 때 사진을 임시 폴더(%TEMP%\ideabox-pics)에 내려받아 경로를 같이 보여 준다(--no-pics면 안 받음).
 // 사진 자료: users/{uid}/ideaPics/{쪽지id}/{사진키} = { s 작은 그림, b 큰 그림 } (JPEG data URL), 쪽지의 ph = [사진키…]
@@ -84,10 +88,10 @@ if (cmd === 'seen') {
   if (!data[id]) { console.error('없는 쪽지:', id); process.exit(1); }
   const files = savePics(id, data[id].ph);
   console.log(files.length ? files.join('\n') : '(사진 없는 쪽지)');
-} else if (cmd === 'done' || cmd === 'reply') {
+} else if (cmd === 'done' || cmd === 'reply' || cmd === 'ask') {
   const id = rest[0];
   const re = (rest[1] || '').trim();
-  if (cmd === 'reply' && !re) { console.error('reply에는 답장 글이 있어야 해요'); process.exit(1); }
+  if (cmd !== 'done' && !re) { console.error(`${cmd}에는 ${cmd === 'ask' ? '질문' : '답장'} 글이 있어야 해요`); process.exit(1); }
   const data = readAll();
   if (!data[id]) { console.error('없는 쪽지:', id); process.exit(1); }
   // 다른 세션이 이미 «끝남»으로 닫은 쪽지는 덮지 않는다(2026-11-17: 매일 받아 두기가 먼저 읽은 목록으로
@@ -96,22 +100,29 @@ if (cmd === 'seen') {
     console.error(`${id}: 이미 끝남(답장: ${data[id].re || '없음'}) — 덮지 않았어요. 바꾸려면 --force`);
     process.exit(2);
   }
-  const part = { st: cmd === 'done' ? 'done' : 'seen' };
+  // ask는 «답 필요»를 켜고, reply·done은 끈다(null = 칸 지우기)
+  const part = { st: cmd === 'done' ? 'done' : 'seen', ask: cmd === 'ask' ? true : null };
   if (re) Object.assign(part, { re, rat: Date.now() });
   patch(id, part);
-  console.log(`${id} → ${part.st}${re ? ' (답장 달음)' : ''}`);
+  console.log(`${id} → ${part.st}${cmd === 'ask' ? ' ❓답 필요 (질문 달음)' : re ? ' (답장 달음)' : ''}`);
 } else {
   const data = readAll();
   const list = Object.entries(data).map(([id, v]) => ({ id, ...v }));
   const n = (s) => list.filter((x) => x.st === s).length;
   if (SAVE) { writeSave({ new: n('new'), hot: list.filter((x) => x.st === 'new' && x.hot).length, seen: n('seen') }); process.exit(0); }
-  if (cmd === '--count') { console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}`); process.exit(0); }
+  const nAsk = list.filter((x) => x.ask && x.st !== 'done').length;
+  const askPart = nAsk ? ` · 답 기다림 ${nAsk}` : '';
+  // 끝남 쪽지 id만 한 줄에 하나(받아 두기가 작업 현황의 💌 줄을 대조해 지울 때)
+  if (cmd === '--done-ids') { console.log(list.filter((x) => x.st === 'done').map((x) => x.id).join('\n')); process.exit(0); }
+  if (cmd === '--count') { console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}${askPart}`); process.exit(0); }
   const shown = list.filter((x) => cmd === '--all' || x.st !== 'done')
     .sort((a, b) => (a.st === 'new' ? 0 : 1) - (b.st === 'new' ? 0 : 1) || (b.hot ? 1 : 0) - (a.hot ? 1 : 0) || a.at - b.at);
-  console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}\n`);
+  console.log(`쪽지함: 새 ${n('new')} · 읽음 ${n('seen')} · 끝남 ${n('done')}${askPart}\n`);
   for (const x of shown) {
     const nPh = (Array.isArray(x.ph) ? x.ph : Object.values(x.ph || {})).filter(Boolean).length;
-    console.log(`[${x.id}] ${x.st}${x.hot ? ' 🔥급함' : ''} · ${x.tag || '일반'} · ${when(x.at)}${nPh ? ` · 📷 사진 ${nPh}장` : ''}`);
+    // 답장(rat) 뒤에 효니가 고친(ed) 새 쪽지 = 효니가 답했거나 덧붙임 → 받아 두기는 seen만(답장으로 덮지 않음)
+    const answered = x.st === 'new' && x.re && x.ed && x.rat && x.ed > x.rat;
+    console.log(`[${x.id}] ${x.st}${x.hot ? ' 🔥급함' : ''}${x.ask && x.st !== 'done' ? ' ❓답 기다림' : ''}${answered ? ' ✍️ 효니가 답장 뒤 고침' : ''} · ${x.tag || '일반'} · ${when(x.at)}${nPh ? ` · 📷 사진 ${nPh}장` : ''}`);
     console.log('  ' + (x.t ? String(x.t).replace(/\n/g, '\n  ') : '(글 없이 사진만)'));
     if (nPh) {
       if (process.argv.includes('--no-pics')) console.log(`  📷 사진 보기: node tools/inbox.js pics ${x.id}`);

@@ -18,6 +18,13 @@ let store = null;
 let ideas = {};
 let filter = 'open';
 let editing = null;
+// 할 일 판: 보는 방법·접은 묶음은 이 기기에 기억, 펼친 줄·끝낸 것 펼침은 이 화면에서만(다시 그려도 유지)
+const VIEW = 'ideabox-view';
+const CLOSED = 'ideabox-board-closed';
+let view = 'list';
+let closedGroups = new Set();
+const openRows = new Set();
+const openDone = new Set();
 
 // ---------- 저장 도우미 ----------
 const ls = {
@@ -45,6 +52,9 @@ function demoStore() {
     d1: { t: '책장 책 창에서 «읽는 중»이랑 «책 정보 고치기» 단추 하나로 합치면 좋겠어', at: now - 86400e3 * 2, tag: '책장', st: 'done', re: '계획 세션을 열어 두 양식을 하나로 합치는 안을 만들었어요.', rat: now - 86400e3 },
     d2: { t: '시간표 앱 할 일 탭에 «이번 주만 보기» 단추가 있으면 좋겠다', at: now - 3600e3 * 5, tag: '시간표', st: 'seen' },
     d3: { t: '다음 주 수업 웹앱 아이디어: 학생이 사료 카드를 시대순으로 끌어다 놓기', at: now - 600e3, tag: '수업', st: 'new', hot: true },
+    d4: { t: '책장 표지 색을 좀 더 따뜻하게 바꾸고 싶어', at: now - 86400e3 * 3, tag: '책장', st: 'seen', ask: true, re: '«따뜻하게»가 귤색 쪽이에요, 아니면 바랜 종이색 쪽이에요?\n고르시면 바로 바꿔 둘게요.', rat: now - 86400e3 * 2 },
+    d5: { t: '시간표 위젯 글씨가 작아\n폰에서 보면 한눈에 안 들어와', at: now - 86400e3 * 4, tag: '시간표', st: 'seen', re: '받아 뒀어요. 위젯 글씨 크기 고치기를 작업 현황에 올렸어요.', rat: now - 86400e3 * 3 },
+    d6: { t: '쪽지함 도구 정리', at: now - 86400e3 * 6, tag: '도구', st: 'done', re: '정리했어요.', rat: now - 86400e3 * 5 },
   };
   // 데모 사진 한 장(그려서 만든 그림)
   const c = document.createElement('canvas'); c.width = 640; c.height = 480;
@@ -143,6 +153,18 @@ function bind() {
   $('#tags').addEventListener('change', saveDraft);
   $('#hot').addEventListener('change', saveDraft);
   $('#list').addEventListener('click', onListClick);
+  view = ls.get(VIEW, 'list') === 'board' ? 'board' : 'list';
+  closedGroups = new Set((ls.get(CLOSED, []) || []).filter((x) => typeof x === 'string'));
+  $('#views').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-view]');
+    if (!b || b.dataset.view === view) return;
+    view = b.dataset.view;
+    ls.set(VIEW, view);
+    render();
+  });
+  $('#groups').addEventListener('click', onBoardClick);
+  $('#groups').addEventListener('change', onBoardCheck);
+  $('#undo-btn').addEventListener('click', doUndo);
   $('#filters').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-f]');
     if (!b) return;
@@ -401,6 +423,11 @@ const pass = (x) => filter === 'all' || (filter === 'open' ? x.st !== 'done' : x
 
 function render(fresh) {
   const items = allItems();
+  const board = view === 'board';
+  for (const b of document.querySelectorAll('#views button[data-view]')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
+  $('#filters').hidden = $('#list').hidden = board;
+  $('#board').hidden = !board;
+  if (board) { $('#empty').hidden = true; return renderBoard(items, fresh); }
   const n = (f) => items.filter((x) => (f === 'all' ? true : f === 'open' ? x.st !== 'done' : x.st === f)).length;
   $('#filters').innerHTML = FILTERS.map(([f, label]) => `<button type="button" class="fchip" data-f="${f}" aria-pressed="${f === filter}">${label} <b>${n(f)}</b></button>`).join('');
   const shown = items.filter(pass);
@@ -414,19 +441,144 @@ function render(fresh) {
   reveal();
 }
 
+// ---------- 할 일 판 ----------
+// 쪽지를 주제별 묶음으로 보고 체크(=끝남)한다. 새 상태는 만들지 않는다: 체크 = st done, 풀기 = 다시 열기와 같다.
+const isAsk = (x) => !!x.ask && x.st !== 'done' && !x.pending;
+const firstLine = (s) => (String(s || '').split('\n').find((l) => l.trim()) || '').trim();
+// 체크·되돌리기 patch(같은 계산을 카드 «끝남으로»·판 체크·되돌리기 줄이 함께 쓴다)
+// 체크하면 «답 필요»도 끈다(끝난 쪽지에 질문이 남지 않게). 되돌리면 둘 다 처음대로.
+function planCheck(x) { return { patch: { st: 'done', ask: null }, undo: { st: x.st === 'done' ? 'seen' : x.st || 'new', ask: x.ask ? true : null } }; }
+function planReopen(x) { return { patch: { st: x.re ? 'seen' : 'new' }, undo: { st: 'done' } }; }
+
+function renderBoard(items, fresh) {
+  const open = items.filter((x) => x.st !== 'done');
+  const nAsk = open.filter(isAsk).length;
+  const nHot = open.filter((x) => x.hot).length;
+  $('#board-sum').innerHTML = items.length
+    ? `남은 일 <b>${open.length}</b>${nAsk ? ` · <span class="sum-ask">❓ 답 필요 <b>${nAsk}</b></span>` : ''}${nHot ? ` · <span class="sum-hot">🔥 급해요 <b>${nHot}</b></span>` : ''}`
+    : '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.';
+  // 묶음: 주제 순서대로, 남은 일이 있는 묶음 먼저. 모르는 주제는 «일반»에.
+  const known = new Set(TAGS.map(([t]) => t));
+  const groups = TAGS.map(([tag, ico]) => {
+    const all = items.filter((x) => (known.has(x.tag) ? x.tag : '일반') === tag);
+    const rank = (x) => (isAsk(x) ? 2 : 0) + (x.hot ? 1 : 0);
+    const todo = all.filter((x) => x.st !== 'done').sort((a, b) => rank(b) - rank(a) || b.at - a.at);
+    const done = all.filter((x) => x.st === 'done').sort((a, b) => (b.rat || b.at) - (a.rat || a.at));
+    return { tag, ico, todo, done };
+  }).filter((g) => g.todo.length || g.done.length);
+  groups.sort((a, b) => (b.todo.length ? 1 : 0) - (a.todo.length ? 1 : 0));
+  $('#groups').innerHTML = groups.map(group).join('');
+  if (fresh) $('#groups').querySelector(`[data-id="${CSS.escape(fresh)}"]`)?.classList.add('fresh');
+  fillThumbs($('#groups'));
+}
+function group(g) {
+  const closed = closedGroups.has(g.tag);
+  const gid = 'g-' + TAGS.findIndex(([t]) => t === g.tag);
+  const doneOpen = openDone.has(g.tag);
+  return `<section class="group${closed ? ' closed' : ''}" data-tag="${esc(g.tag)}">
+    <h3><button type="button" class="ghead" data-act="group" aria-expanded="${!closed}" aria-controls="${gid}">
+      <span class="gname">${g.ico} ${esc(g.tag)}</span><span class="gcount">${g.todo.length ? `남은 <b>${g.todo.length}</b>` : '다 끝남'}</span><span class="caret" aria-hidden="true"></span>
+    </button></h3>
+    <div class="gbody" id="${gid}"${closed ? ' hidden' : ''}>
+      ${g.todo.length ? `<ul class="rows">${g.todo.map(row).join('')}</ul>` : ''}
+      ${g.done.length ? `<button type="button" class="done-toggle" data-act="donefold" aria-expanded="${doneOpen}">끝낸 것 ${g.done.length}개 ${doneOpen ? '접기' : '보기'}</button>
+      ${doneOpen ? `<ul class="rows rows-done">${g.done.map(row).join('')}</ul>` : ''}` : ''}
+    </div>
+  </section>`;
+}
+function row(x) {
+  const done = x.st === 'done';
+  const ask = isAsk(x);
+  const expanded = openRows.has(x.id);
+  const ph = Array.isArray(x.ph) ? x.ph.filter(Boolean) : [];
+  const title = firstLine(x.t) || (ph.length ? `📷 사진 ${ph.length}장` : '(빈 쪽지)');
+  const sub = x.pending ? '<span class="tsub wait">올라가길 기다리는 중</span>'
+    : x.re ? `<span class="tsub${ask ? ' ask' : ''}">${ask ? '❓ ' : '클로드: '}${esc(firstLine(x.re))}</span>` : '';
+  const marks = `${x.hot && !done ? '<span class="tmark hot" title="급해요">🔥</span>' : ''}${ph.length ? '<span class="tmark" title="사진">📷</span>' : ''}`;
+  const more = expanded ? `<div class="tmore">
+      ${x.t ? `<p class="text">${esc(x.t)}</p>` : ''}
+      ${ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : ''}
+      ${x.re ? `<div class="reply${ask ? ' is-ask' : ''}"><span class="who">${ask ? '❓ 클로드가 물어요' : '클로드'}</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : ''}
+      <div class="row"><span class="tmeta">${when(x.at)}${x.ed ? ' · 고침' : ''}</span><span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${ask ? '답하기' : '고치기'}</button>`}<button type="button" class="del" data-act="del">지우기</button></span></div>
+    </div>` : '';
+  return `<li class="trow${done ? ' is-done' : ''}${ask ? ' is-ask' : ''}${x.hot && !done ? ' is-hot' : ''}${expanded ? ' open' : ''}" data-id="${esc(x.id)}">
+    <label class="tcheck"><input type="checkbox" data-act="check"${done ? ' checked' : ''}${x.pending ? ' disabled' : ''}><span class="vh">${done ? '끝남 — 풀면 다시 열어요' : '끝남으로 체크'}: ${esc(title)}</span></label>
+    <button type="button" class="tmain" data-act="expand" aria-expanded="${expanded}"><span class="ttitle">${esc(title)}</span>${sub}</button>
+    ${marks ? `<span class="tmarks">${marks}</span>` : ''}
+    ${more}
+  </li>`;
+}
+function onBoardClick(e) {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  const act = b.dataset.act;
+  if (act === 'group') {
+    const tag = b.closest('.group').dataset.tag;
+    closedGroups.has(tag) ? closedGroups.delete(tag) : closedGroups.add(tag);
+    ls.set(CLOSED, [...closedGroups]);
+    return render();
+  }
+  if (act === 'donefold') {
+    const tag = b.closest('.group').dataset.tag;
+    openDone.has(tag) ? openDone.delete(tag) : openDone.add(tag);
+    return render();
+  }
+  if (act === 'expand') {
+    const id = b.closest('[data-id]').dataset.id;
+    openRows.has(id) ? openRows.delete(id) : openRows.add(id);
+    return render();
+  }
+  return onListClick(e); // 사진·고치기·지우기는 카드와 같은 처리
+}
+function onBoardCheck(e) {
+  const box = e.target.closest('input[data-act="check"]');
+  if (!box) return;
+  const id = box.closest('[data-id]').dataset.id;
+  const x = ideas[id];
+  if (!x) { box.checked = !box.checked; return toast('아직 올라가지 않은 쪽지예요.'); }
+  checkItem(id, x, box.checked);
+}
+// 체크(끝남) 또는 풀기(다시 열기). 되돌리기 줄을 목록 밖 아래에 띄운다.
+async function checkItem(id, x, toDone) {
+  const plan = toDone ? planCheck(x) : planReopen(x);
+  const msg = toDone ? '끝남으로 옮겼어요' : '다시 열었어요';
+  try {
+    await withTimeout(store.patch(id, plan.patch), 8000);
+    showUndo(msg, id, plan.undo);
+  } catch (e) { hideUndo(); render(); toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
+}
+let undoState = null;
+let undoTimer;
+function showUndo(msg, id, part) {
+  undoState = { id, part };
+  $('#undo-msg').textContent = msg;
+  $('#undo').hidden = false;
+  $('#toast').classList.remove('show');
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(hideUndo, 6000);
+}
+function hideUndo() { clearTimeout(undoTimer); undoState = null; $('#undo').hidden = true; }
+async function doUndo() {
+  const u = undoState;
+  hideUndo();
+  if (!u || !ideas[u.id]) return toast('되돌릴 쪽지가 없어요.');
+  await run(store.patch(u.id, u.part), '되돌렸어요');
+}
+
 function card(x) {
   const ico = (TAGS.find(([t]) => t === x.tag) || TAGS[0])[1];
   const st = x.pending ? '<span class="badge wait">올라가길 기다리는 중</span>' : `<span class="badge ${x.st}">${STATES[x.st] || ''}</span>`;
-  const re = x.re ? `<div class="reply"><span class="who">클로드</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : '';
+  const ask = isAsk(x);
+  const re = x.re ? `<div class="reply${ask ? ' is-ask' : ''}"><span class="who">${ask ? '❓ 클로드가 물어요' : '클로드'}</span><p>${esc(x.re)}</p>${x.rat ? `<time>${when(x.rat)}</time>` : ''}</div>` : '';
   const ph = Array.isArray(x.ph) ? x.ph.filter(Boolean) : [];
   const pics = ph.length ? `<div class="thumbs">${ph.map((k, i) => `<button type="button" class="thumb" data-act="pic" data-k="${esc(k)}" data-i="${i}" aria-label="사진 ${i + 1} 크게 보기"><img alt="" data-pic="${esc(x.id)}/${esc(k)}"></button>`).join('')}</div>` : '';
   const doneBtn = x.st === 'done' ? '<button type="button" data-act="reopen">다시 열기</button>' : '<button type="button" data-act="done">끝남으로</button>';
   return `<li class="card${x.hot && x.st !== 'done' ? ' is-hot' : ''}${x.st === 'done' ? ' is-done' : ''}${shownIds.has(x.id) ? ' show' : ''}" data-id="${esc(x.id)}">
-    <div class="meta"><span class="tag">${ico} ${esc(x.tag || '일반')}</span>${x.hot ? '<span class="hotmark">🔥 급해요</span>' : ''}<time>${when(x.at)}${x.ed ? ' · 고침' : ''}</time></div>
+    <div class="meta"><span class="tag">${ico} ${esc(x.tag || '일반')}</span>${x.hot ? '<span class="hotmark">🔥 급해요</span>' : ''}${ask ? '<span class="askmark">❓ 답 필요</span>' : ''}<time>${when(x.at)}${x.ed ? ' · 고침' : ''}</time></div>
     ${x.t ? `<p class="text">${esc(x.t)}</p>` : ''}
     ${pics}
     ${re}
-    <div class="row">${st}<span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">고치기</button>${doneBtn}`}<button type="button" class="del" data-act="del">지우기</button></span></div>
+    <div class="row">${st}<span class="acts">${x.pending ? '' : `<button type="button" data-act="edit">${ask ? '답하기' : '고치기'}</button>${doneBtn}`}<button type="button" class="del" data-act="del">지우기</button></span></div>
   </li>`;
 }
 
@@ -449,8 +601,8 @@ async function onListClick(e) {
   }
   if (!x) return;
   if (act === 'edit') return openEdit(id, x);
-  if (act === 'done') return run(store.patch(id, { st: 'done' }), '끝남으로 옮겼어요');
-  if (act === 'reopen') return run(store.patch(id, { st: x.re ? 'seen' : 'new' }), '다시 열었어요');
+  if (act === 'done') return checkItem(id, x, true);
+  if (act === 'reopen') return checkItem(id, x, false);
 }
 async function run(p, msg) {
   try { await withTimeout(p, 8000); toast(msg); } catch (e) { toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
@@ -461,6 +613,11 @@ function openEdit(id, x) {
   $('#edit-t').value = x.t;
   setChip('etag', x.tag);
   $('#edit-hot').checked = !!x.hot;
+  // «답 필요» 쪽지는 고치기 창을 답하는 창으로 쓴다: 클로드 질문을 위에 보이고, 글 끝에 답을 덧붙여 저장
+  const ask = isAsk({ ...x, id });
+  $('#edit-ask').hidden = !ask;
+  $('#edit-ask-q').textContent = ask ? x.re || '' : '';
+  $('#edit-title').textContent = ask ? '클로드에게 답하기' : '쪽지 고치기';
   editGen++;
   shrinking.edit = 0; // 앞 창에서 줄이던 사진은 버리므로 «줄이는 중» 칸도 비운다
   editPics = (Array.isArray(x.ph) ? x.ph.filter(Boolean) : []).map((k) => ({ k, src: `${id}/${k}`, old: true }));
@@ -485,6 +642,8 @@ async function saveEdit() {
   if (picsChanged) part.ph = newKeys.length ? newKeys : null;
   // 클로드가 읽은 뒤 글이나 사진을 고쳤으면 다시 «새 쪽지»로 돌려 다음에 또 읽게 한다
   if (cur.st === 'seen' && (t !== (cur.t || '') || picsChanged)) part.st = 'new';
+  // «답 필요» 쪽지에 글·사진을 더했으면 답한 것으로 보고 끈다(위 줄이 «새 쪽지»로 돌려 클로드가 다시 읽음)
+  if (cur.ask && cur.st !== 'done' && (t !== (cur.t || '') || picsChanged)) { part.ask = null; part.st = 'new'; }
   $('#edit').close();
   editing = null;
   // 순서: 새 사진 올리기 → 쪽지 고치기 → 뺀 사진 지우기(중간에 끊겨도 쪽지가 없는 사진을 가리키지 않게)
@@ -492,7 +651,7 @@ async function saveEdit() {
     await withTimeout(store.putPics(id, Object.fromEntries(added.map((p) => [p.k, { s: p.s, b: p.b }]))), 30000);
     await withTimeout(store.patch(id, part), 8000);
     for (const p of added) thumbs.set(`${id}/${p.k}`, p.s);
-    toast('고쳤어요');
+    toast(part.ask === null ? '답을 넣었어요. 클로드가 다음에 읽어요' : '고쳤어요');
   } catch (e) { return toast('저장하지 못했어요. 인터넷을 확인해 주세요.'); }
   store.dropPics(id, removed).catch(() => {});
 }
