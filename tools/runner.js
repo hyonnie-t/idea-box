@@ -5,6 +5,10 @@
 //   node tools/runner.js            계속 돈다(sync-pc.ps1이 세션 시작 때 창 없이 켬, 이미 돌면 그냥 끝남)
 //   node tools/runner.js --once     한 번만 보고 끝(시험용) / --dry 가져가지 않고 무엇을 할지만 출력
 // 쪽지 칸: go 시킨 때(ms, 앱이 씀) · run {pc, at, n, sid} 하는 중(이 실행기가 씀) · sid/spc 마지막 세션 id·PC(이어서 할 때 --resume)
+// PC 고르기(2026-11-18 오후, 출처: 효니 말 «왜 켜진 컴퓨터 말고 학교 PC가 가져갔냐», «차라리 나한테 물어보는 게 낫지않냐»):
+//   앱이 체크할 때 «어느 PC에서 할까요?»를 묻고 go와 함께 run {pc, at, n:'wait'}를 적는다 → 그 PC 실행기만 가져간다.
+//   실행기는 1분마다 users/{uid}/ideaRunners/{PC} = {at, ok, why} 켜짐 신호를 쓴다(앱이 켜진 PC만 고르게). claude를 못 여는 PC는 가져가지 않는다.
+//   go만 있고 run이 없는 쪽지(옛 화면, spc 없는 답하기)는 예전처럼 먼저 본 PC가(쓰는 PC 먼저) 가져간다.
 // 여러 PC가 같이 돌아도 한 번만 하게: run에 내 표(n)를 쓰고 몇 초 뒤 다시 읽어 내 표일 때만 시작한다.
 // «효니에게 물을 것»(2026-11-18): 켜질 때와 10분마다 tools/asks.js로 계획·작업 목록의 물을 것을 올리고 효니 답을 출처 파일에 적는다.
 //   물을 것(src 칸)을 시키면 그 출처 파일에서 이어 가라는 지시문으로 세션을 연다.
@@ -76,6 +80,17 @@ function killOldRunners() {
   } catch (e) {}
 }
 
+// 이 PC에서 claude를 열 수 있나(세션을 열 때와 같은 방식으로 불러 본다). 못 열면 쪽지를 가져가지 않고, 앱 PC 창에도 못 고르게 뜬다.
+// 2026-11-18 학교 PC가 쪽지를 가져간 뒤 `spawn claude ENOENT`로 바로 멈춘 일에서.
+let canRun = { ok: false, why: '아직 확인 전', at: 0 };
+function checkClaude() {
+  const r = spawnSync('claude', ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+  canRun = r.error || r.status !== 0
+    ? { ok: false, why: r.error && r.error.code === 'ENOENT' ? 'claude 명령을 찾지 못해요' : 'claude가 열리지 않아요', at: Date.now() }
+    : { ok: true, why: '', at: Date.now() };
+  return canRun;
+}
+
 // 이 PC를 효니가 마지막으로 만진 지 몇 ms(Windows만, 못 재면 0 = 쓰는 중으로 봄)
 function idleMs() {
   if (process.platform !== 'win32') return 0;
@@ -110,7 +125,7 @@ function restartIfChanged() {
 
 function fbcli(args) {
   const r = spawnSync(NPX, ['--yes', 'firebase-tools', ...args, '--project', PROJECT], {
-    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, shell: process.platform === 'win32', windowsHide: true, env: { ...process.env, MSYS_NO_PATHCONV: '1' },
+    encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, shell: process.platform === 'win32', windowsHide: true, timeout: 90000, env: { ...process.env, MSYS_NO_PATHCONV: '1' }, // 멈춘 firebase 명령이 실행기 전체를 세우지 않게
   });
   if (r.status !== 0) throw new Error((r.stderr || r.stdout || '').trim().split('\n').slice(-2).join(' '));
   return r.stdout;
@@ -124,6 +139,19 @@ function patch(id, part) {
   fs.writeFileSync(tmp, JSON.stringify(part));
   try { fbcli(['database:update', q(`${BASE}/${id}`), q(tmp), '--force']); } finally { fs.rmSync(tmp, { force: true }); }
 }
+// 켜짐 신호. PC 이름(한글일 수 있음)을 명령줄에 넣지 않으려고 윗칸에 { PC: … }로 쓴다.
+// 일하는 중에도 찍히게 tick과 따로 돈다(안 그러면 바쁜 PC가 앱에 «꺼져 있어요»로 뜬다).
+function beat() {
+  if (Date.now() - canRun.at > 10 * 60e3) { const was = canRun.ok; checkClaude(); if (was !== canRun.ok) log(canRun.ok ? 'claude 열 수 있음' : `claude 못 엶: ${canRun.why}`); }
+  const tmp = path.join(os.tmpdir(), 'ideabox-run-beat.json');
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ [PC]: { at: Date.now(), ok: canRun.ok, why: canRun.why || null } }));
+    fbcli(['database:update', `/users/${UID}/ideaRunners`, q(tmp), '--force']);
+  } catch (e) { log('켜짐 신호 실패: ' + e.message.slice(0, 160)); } finally { fs.rmSync(tmp, { force: true }); }
+}
+const isWait = (x) => !!x.run && x.run.n === 'wait'; // 앱이 «이 PC에서 해 줘»라고 적어 둔 것(아직 아무도 안 가져감)
+// 내 일: 효니가 이 PC를 고른 쪽지, 또는 PC를 안 고른 옛 방식(go만 있음)
+const mine = (x) => !!x && !!x.go && x.st !== 'done' && (isWait(x) ? x.run.pc === PC : !x.run);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const firstLine = (s) => (String(s || '').split('\n').find((l) => l.trim()) || '').trim();
 
@@ -196,6 +224,14 @@ async function step() {
   const now = Date.now();
   // 이 PC가 맡았는데 지금 안 돌고 있는 일(실행기·PC가 꺼졌다 켜짐) → 멈췄다고 알리고 내려놓기
   for (const [id, x] of Object.entries(all)) {
+    if (isWait(x)) {
+      // 효니가 고른 PC가 4시간 넘게 안 가져감(꺼져 있음) → 알리고 내려놓기. 그 전엔 그대로 둔다(하는 중인 run이 아님)
+      if (now - (x.run.at || 0) > STALE && x.st !== 'done' && !DRY) {
+        log(`${id} 고른 PC(${x.run.pc})가 안 가져감 — 내려놓음`);
+        try { patch(id, { run: null, go: null, st: 'seen', re: `${x.run.pc} PC가 시작하지 못했어요(꺼져 있거나 클로드를 못 엶). 다시 체크해서 켜진 PC를 골라 주세요.`, rat: now }); } catch (e) {}
+      }
+      continue;
+    }
     // 이 PC 것: 내가 돌리는 일도 아니고, 그 일을 연 실행기(run.rp)도 죽었을 때만. 다른 PC 것: 4시간 넘었을 때
     // (세션 제한 2시간+10분이 넘은 run은 pid가 살아 있어도 멈춘 것 — 재부팅 뒤 같은 pid를 다른 프로그램이 쓸 수 있다)
     const tooOld = x.run && now - (x.run.at || 0) > LIMIT + 10 * 60e3;
@@ -206,10 +242,11 @@ async function step() {
       try { patch(id, { run: null, go: null, st: 'seen', re: `중간에 멈췄어요(${x.run.pc} PC가 꺼졌거나 끊김). 다시 체크하면 다시 할게요.`, rat: now }); } catch (e) {}
     }
   }
-  const todo = Object.entries(all).filter(([, x]) => x.go && !x.run && x.st !== 'done').sort((a, b) => a[1].go - b[1].go);
+  const todo = Object.entries(all).filter(([, x]) => mine(x)).sort((a, b) => a[1].go - b[1].go);
   if (!todo.length) return;
   const [id, x] = todo[0];
-  if (DRY) { log(`(dry) 할 일: ${id} «${firstLine(x.t).slice(0, 40)}»`); return; }
+  if (DRY) { log(`(dry) 할 일: ${id} «${firstLine(x.t).slice(0, 40)}»${isWait(x) ? ' (효니가 이 PC를 고름)' : ''}${canRun.ok ? '' : ` — 못 가져감(${canRun.why})`}`); return; }
+  if (!canRun.ok) { if (Date.now() - canRun.at > 5 * 60e3) checkClaude(); if (!canRun.ok) { log(`${id} 건너뜀: ${canRun.why}`); return; } }
   // 가져가기: 내 표를 쓰고 몇 초 뒤 다시 읽어 확인(다른 PC와 겹치지 않게)
   const n = crypto.randomBytes(4).toString('hex');
   const resume = x.sid && x.spc === PC;
@@ -217,10 +254,10 @@ async function step() {
   try {
     // 쓰는 PC 먼저(2026-11-18, 출처: 효니 말 «학교 PC로 갔다는데 왜 글로 가?»): 효니가 5분 넘게 안 만진 PC는 90초 기다렸다가 본다.
     // 그 사이 효니가 쓰고 있는 PC가 가져가면 아래 «그새 바뀜»으로 물러난다. 쓰는 PC가 없으면 쉬는 PC가 한다.
-    const idle = idleMs();
+    const idle = isWait(x) ? 0 : idleMs(); // 효니가 이 PC를 골랐으면 양보하지 않는다
     if (idle > IDLE) { log(`${id} 이 PC는 쉬는 중(${Math.round(idle / 60e3)}분) — 쓰는 PC에 90초 양보`); await sleep(YIELD); }
     const pre = readOne(id); // 쓰기 직전에 한 번 더: 그새 다른 PC가 가져갔으면 손대지 않음
-    if (!pre || pre.run || !pre.go || pre.st === 'done') { log(`${id} 그새 바뀜 — 건너뜀`); return; }
+    if (!mine(pre)) { log(`${id} 그새 바뀜 — 건너뜀`); return; }
     // st new → seen: 받아 두기(ideabox-collect)가 «새 쪽지»로 보고 reply로 덮지 않게
     myN = n;
     patch(id, { run: { pc: PC, at: Date.now(), n, sid, rp: process.pid }, ...(pre.st === 'new' ? { st: 'seen' } : {}) });
@@ -253,8 +290,13 @@ async function step() {
       if (after && after.st === 'done') patch(id, { run: null, go: null, sid, spc: PC }); // 효니가 그새 «끝남»으로 닫음 → 상태는 그대로
       else if (after && after.run?.n === n) {
         // 세션이 inbox.js로 답장을 남기지 않음 → 마지막 말을 답장으로 남기고 내려놓기
-        const re = code === 0 && result ? `(답장을 못 남겨서 대신 적어요) ${result.slice(0, 600)}` : `하다가 멈췄어요(코드 ${code}). 다시 체크하면 이어서 할게요.`;
-        patch(id, { run: null, go: null, st: 'seen', re, rat: Date.now(), sid, spc: PC });
+        // 세션을 열지도 못한 경우(claude 없음)는 그대로 말한다 — «PC가 꺼졌다»로 잘못 알리지 않게. 세션이 없으니 sid·spc도 남기지 않는다(다음에 없는 세션을 --resume하지 않게)
+        const noStart = /ENOENT/.test(err);
+        if (noStart) canRun = { ok: false, why: 'claude 명령을 찾지 못해요', at: Date.now() };
+        const re = code === 0 && result ? `(답장을 못 남겨서 대신 적어요) ${result.slice(0, 600)}`
+          : noStart ? `${PC} PC에서 클로드를 열지 못해 시작하지 못했어요. 다시 체크해서 다른 PC를 골라 주세요.`
+            : `하다가 멈췄어요(코드 ${code}). 다시 체크하면 이어서 할게요.`;
+        patch(id, { run: null, go: null, st: 'seen', re, rat: Date.now(), ...(noStart ? {} : { sid, spc: PC }) });
       } else if (after) patch(id, { sid, spc: PC });
     } catch (e) { log(`${id} 마무리 쓰기 실패: ${e.message.slice(0, 160)}`); }
     if (ONCE) process.exit(0);
@@ -267,10 +309,13 @@ async function step() {
   if (!DRY && !takeLock()) { if (ONCE) console.log('이 PC에서 실행기가 이미 돌고 있어요'); return; } // 이미 도는 중
   if (!DRY) { await sleep(400 + Math.random() * 600); if (lockPid() !== process.pid) return; } // 같은 순간에 켜진 다른 실행기가 잠금을 가져갔으면 물러남
   if (!DRY && !ONCE) killOldRunners();
-  log(`실행기 켜짐 (${ROOT})`);
+  checkClaude();
+  log(`실행기 켜짐 (${ROOT})${canRun.ok ? '' : ` — ${canRun.why}, 쪽지를 가져가지 않아요`}`);
+  if (!DRY) beat();
   asksTick();
   await tick();
   if (ONCE || DRY) { if (!busy) process.exit(0); return; }
   setInterval(tick, EVERY);
+  setInterval(beat, EVERY);
   setInterval(asksTick, ASK_EVERY);
 })();
