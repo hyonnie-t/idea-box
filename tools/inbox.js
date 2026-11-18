@@ -79,7 +79,9 @@ function savePics(id, ph) {
 }
 
 const when = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
-const [cmd, ...rest] = process.argv.slice(2);
+// --force·--no-pics는 어디에 붙여도 선택 표시일 뿐, 답장 글이나 id로 읽지 않는다
+// (2026-11-17: `done <id> --force`가 답장 칸에 «--force»를 써서 원래 답장을 덮음)
+const [cmd, ...rest] = process.argv.slice(2).filter((a) => a !== '--force' && a !== '--no-pics');
 
 if (cmd === 'seen') {
   const data = readAll();
