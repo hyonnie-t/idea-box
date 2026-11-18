@@ -761,8 +761,30 @@ async function hardRefresh() {
   } catch (e) {}
   location.reload();
 }
+// ---------- 낡은 화면 막기 ----------
+// 새 판이 배포돼도 열어 둔 화면은 옛 코드로 돈다. 2026-11-18: 체크가 «끝남»에서 «시키기»로 바뀐 날,
+// 새로고침 안 한 옛 화면에서 체크한 줄이 모두 «끝남»으로 저장됐다(출처: 효니 말 «새로고침 안 하고 체크했더니 … 다 끝남으로 넘어가버림»).
+// 그래서 화면으로 돌아올 때마다(그리고 켜 둔 채 10분마다) 새 판을 찾고, 새 서비스워커가 넘겨받으면 바로 다시 연다.
+// 쓰던 글·보낼 쪽지는 기기에 저장돼 있어 다시 열어도 남는다. 고치기 창이 열려 있으면 닫힐 때까지 기다린다(0.5초마다 봄).
+let swReg = null;
+let oldPage = false;
 function registerSW() {
-  if ('serviceWorker' in navigator && !isLocal) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (!('serviceWorker' in navigator) || (isLocal && !params.has('sw'))) return; // 내 PC에선 ?sw=1일 때만(새 판 넘겨받기 시험용)
+  const had = !!navigator.serviceWorker.controller; // 처음 설치될 때의 넘겨받기는 새 판이 아니다
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (had) { oldPage = true; freshen(); } });
+  navigator.serviceWorker.register('sw.js').then((r) => { swReg = r; }).catch(() => {});
+  const look = () => { if (document.visibilityState !== 'visible') return; if (oldPage) return freshen(); swReg?.update().catch(() => {}); };
+  document.addEventListener('visibilitychange', look);
+  window.addEventListener('pageshow', look);
+  setInterval(look, 10 * 60e3);
+}
+let freshWait;
+function freshen() {
+  if (document.querySelector('dialog[open]')) {
+    if (!freshWait) { toast('새 판이 나왔어요. 이 창을 닫으면 다시 열게요.'); freshWait = setInterval(() => { if (!document.querySelector('dialog[open]')) location.reload(); }, 500); }
+    return;
+  }
+  location.reload();
 }
 
 start();
