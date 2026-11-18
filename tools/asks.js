@@ -84,7 +84,8 @@ function collect() {
   out.bad = new Set();
   for (const abs of p.askFiles()) {
     const rel = path.relative(ROOT, abs).split(path.sep).join('/');
-    try { fs.readFileSync(abs); } catch (e) { out.bad.add(rel); continue; }
+    // 0바이트도 못 읽은 것으로 본다(OneDrive가 내려받는 중 빈 파일을 보여 줄 때 항목이 «사라짐»으로 닫히지 않게)
+    try { if (!fs.readFileSync(abs).length) throw new Error('빈 파일'); } catch (e) { out.bad.add(rel); continue; }
     for (const e of p.askEntries(abs)) {
       const { q, d } = splitDefault(e.text);
       out.push({ id: idOf(rel, e.text), rel, abs, l: labelOf(rel), q: q.slice(0, 600), d: d.slice(0, 200), line: e.line, text: e.text, blocked: blockedReason(e.text) });
