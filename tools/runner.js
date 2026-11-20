@@ -310,7 +310,10 @@ function stallChecks(all, beats, now, mineRunning = running, activityOf = sessio
     if (!x || !x.run || x.st === 'done' || !x.go) continue;
     const what = `«${logT(x)}»`;
     if (isWait(x)) {
-      if (now - (x.run.at || 0) > STALL) out.push({ key: `wait:${id}:${x.run.at}`, head: `시킨 일 안 가져감: ${what} — ${x.run.pc} PC, ${mins(now - x.run.at)}째`,
+      // 고른 PC가 켜져 있고 시킨 일을 상한(max)만큼 돌리는 중이면 줄 서 있는 것 — 알리지 않는다(2026-11-20 검토자 지적)
+      const pb = beats[x.run.pc];
+      const queued = pb && now - (pb.at || 0) < 5 * 60e3 && pb.max && pb.busy >= pb.max;
+      if (!queued && now - (x.run.at || 0) > STALL) out.push({ key: `wait:${id}:${x.run.at}`, head: `시킨 일 안 가져감: ${what} — ${x.run.pc} PC, ${mins(now - x.run.at)}째`,
         body: `${kstTime(x.run.at)}에 ${x.run.pc} PC로 시켰는데 아직 시작하지 않았어요. 그 PC가 꺼져 있거나 쪽지함 실행기가 안 도는 것 같아요. 체크를 풀고 켜진 PC를 다시 골라 주세요(4시간이 지나면 실행기가 알아서 내려놓아요).` });
       continue;
     }
@@ -500,8 +503,9 @@ if (process.argv.includes('--watch-test')) {
     f: { t: 'USER 도는 일', go: 1, run: { pc: 'USER', n: 'dddd4444', at: now - 60 * M } }, // 아직(신호 1분 전)
     g: { t: '끝난 일', st: 'done', go: 1, run: { pc: 'USER', n: 'wait', at: now - 90 * M } }, // 빼기
     h: { t: '남의 PC 표, 내 실행기 것 아님', go: 1, run: { pc: PC, n: 'eeee5555', at: now - 50 * M, sid: 'S3' } }, // 빼기(step이 내려놓음)
+    i: { t: '줄 선 셋째 일', go: 1, run: { pc: 'QPC', n: 'wait', at: now - 40 * M } }, // 빼기(그 PC가 2개 돌리는 중)
   };
-  const beats = { '신영현-학생자치': { at: now - 40 * M }, USER: { at: now - 1 * M } };
+  const beats = { '신영현-학생자치': { at: now - 40 * M }, USER: { at: now - 1 * M }, QPC: { at: now - 1 * M, busy: 2, max: 2 } };
   const mineR = new Map([['aaaa1111', 'c'], ['bbbb2222', 'd']]);
   const act = (sid) => ({ S1: now - 45 * M, S2: now - 2 * M }[sid] || 0);
   const got = stallChecks(all, beats, now, mineR, act).map((w) => w.key);
