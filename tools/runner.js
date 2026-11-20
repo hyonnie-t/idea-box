@@ -243,6 +243,116 @@ function asksTick() {
   pruneLog(); // 1시간에 한 번만 실제로 돈다
 }
 
+// 멈춤 감시(2026-11-20, 출처: 효니 말 «둘 다 넣자» — 트윗 0ooooo0의 «30분 넘게 진행 없으면 감지»). 5분마다 본다. 알림까지만 하고 다시 돌리지 않는다.
+//   ① 이 PC가 돌리는 시킨 일: 그 세션 대화 기록(~/.claude/projects/…/<sid>.jsonl, 서브에이전트 기록 포함)이 30분 넘게 그대로
+//   ② 효니가 고른 PC가 30분 넘게 안 가져감(4시간 뒤 내려놓기는 위 step이 그대로 함)
+//   ③ 다른 PC가 하는 중인데 그 PC 실행기 켜짐 신호가 30분 넘게 끊김(실행기가 죽었거나 PC가 잠듦 — 11-18 학교 PC처럼 아무도 모르던 일)
+//   ④ 이 PC 예약 작업 실행이 30분 넘게 움직임 없음(클로드작업\도구\예약작업\현황\멈춤감시.js가 디스크 기록으로 판정)
+// 알림 = 쪽지 하나(id «w»+판정 열쇠 해시, 주제 도구·급해요·st seen·re·rep) → 앱이 «🔔 클로드 답장이 왔어요» 창과 «내 차례» 띠로 보인다.
+// 같은 일은 쪽지 id가 같아서 PC가 여럿이어도, 실행기가 다시 켜져도 한 번만 만든다(있으면 안 씀). 효니가 끝내거나 지워도 다시 안 만든다(지운 건 이 실행기 기억으로만 막음).
+const WATCH_EVERY = 5 * 60e3;
+const STALL = 30 * 60e3;
+const WATCH_FAKE = (() => { const i = process.argv.indexOf('--watch-fake'); return i > 0 ? Number(process.argv[i + 1]) || 40 : 0; })(); // 시험: 가짜 «N분 멈춘 예약 실행»
+// 이 PC가 이미 낸·본 알림 id는 파일에도 적어 둔다 — 실행기가 다시 켜진 뒤 효니가 지운 알림을 또 만들지 않게(7일 지난 건 버림)
+const WARNED = path.join(os.tmpdir(), 'ideabox-warned.json');
+const warned = (() => {
+  const s = new Set();
+  try { for (const [id, t] of Object.entries(JSON.parse(fs.readFileSync(WARNED, 'utf8')))) if (Date.now() - t < 7 * 864e5) s.add(id); } catch (e) {}
+  return s;
+})();
+function rememberWarned(id) {
+  warned.add(id);
+  if (DRY) return;
+  let m = {};
+  try { m = JSON.parse(fs.readFileSync(WARNED, 'utf8')); } catch (e) {}
+  m[id] = Date.now();
+  for (const [k, t] of Object.entries(m)) if (Date.now() - t > 7 * 864e5) delete m[k];
+  try { fs.writeFileSync(WARNED, JSON.stringify(m)); } catch (e) {}
+}
+const slugOf = (p) => String(p).replace(/[^A-Za-z0-9]/g, '-');
+// 시킨 일 세션의 마지막 움직임(대화 기록·서브에이전트 기록 중 가장 늦게 바뀐 때). 기록이 아직 없으면 0
+function sessionActivity(sid) {
+  const tp = path.join(os.homedir(), '.claude', 'projects', slugOf(ROOT), `${sid}.jsonl`);
+  let t = 0;
+  try { t = fs.statSync(tp).mtimeMs; } catch (e) { return 0; }
+  const sub = path.join(tp.replace(/\.jsonl$/, ''), 'subagents');
+  try { for (const f of fs.readdirSync(sub)) t = Math.max(t, fs.statSync(path.join(sub, f)).mtimeMs); } catch (e) {}
+  return t;
+}
+const mins = (ms) => (ms >= 90 * 60e3 ? `${Math.round(ms / 3600e3)}시간` : `${Math.round(ms / 60e3)}분`);
+const kstTime = (t) => new Date(t + 9 * 3600e3).toISOString().slice(5, 16).replace('T', ' ').replace(/^0/, '').replace('-', '/');
+// 예약 작업 한국어 이름: 현황\<PC>.json의 title(없으면 작업 id)
+function schedTitle(task) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(ROOT, '클로드작업', '도구', '예약작업', '현황', `${PC}.json`), 'utf8'));
+    const t = (j.tasks || []).find((x) => x.task === task);
+    if (t && t.title) return t.title;
+  } catch (e) {}
+  return task;
+}
+function warnOnce(key, head, body) {
+  const id = 'w' + crypto.createHash('sha1').update(key).digest('hex').slice(0, 12);
+  if (warned.has(id)) return false;
+  if (DRY) { log(`(dry) 알림 낼 것 ${id}: ${head}`); warned.add(id); return false; }
+  try {
+    if (readOne(id)) { rememberWarned(id); return false; } // 다른 PC·이전 실행기가 이미 알림
+    const now = Date.now();
+    patch(id, { t: `⚠️ ${head}`, at: now, tag: '도구', hot: true, st: 'seen', re: `${body}\n\n(멈춤 감시가 남긴 알림이에요. 다시 돌리지는 않았어요. 확인했으면 «끝남으로» 눌러 주세요.)`, rat: now, rep: now, warn: { k: key.slice(0, 120), pc: PC } });
+    rememberWarned(id);
+    log(`멈춤 알림 ${id}: ${head}`);
+    return true;
+  } catch (e) { log(`멈춤 알림 실패(${key.slice(0, 40)}): ${String(e.message || e).slice(0, 160)}`); return false; }
+}
+// 판정만(쓰기 없음): 쪽지·켜짐 신호·지금 시각·내가 돌리는 표·세션 움직임 → 낼 알림 목록 {key, head, body}. --watch-test가 가짜 자료로 부른다.
+function stallChecks(all, beats, now, mineRunning = running, activityOf = sessionActivity) {
+  const out = [];
+  for (const [id, x] of Object.entries(all || {})) {
+    if (!x || !x.run || x.st === 'done' || !x.go) continue;
+    const what = `«${logT(x)}»`;
+    if (isWait(x)) {
+      if (now - (x.run.at || 0) > STALL) out.push({ key: `wait:${id}:${x.run.at}`, head: `시킨 일 안 가져감: ${what} — ${x.run.pc} PC, ${mins(now - x.run.at)}째`,
+        body: `${kstTime(x.run.at)}에 ${x.run.pc} PC로 시켰는데 아직 시작하지 않았어요. 그 PC가 꺼져 있거나 쪽지함 실행기가 안 도는 것 같아요. 체크를 풀고 켜진 PC를 다시 골라 주세요(4시간이 지나면 실행기가 알아서 내려놓아요).` });
+      continue;
+    }
+    if (x.run.pc === PC) {
+      if (!mineRunning.has(x.run.n) || now - (x.run.at || 0) < STALL) continue;
+      const act = Math.max(activityOf(x.run.sid), x.run.at || 0);
+      if (now - act > STALL) out.push({ key: `run:${x.run.n}`, head: `시킨 일 멈춤: ${what} — ${PC}, ${mins(now - act)}째 움직임 없음`,
+        body: `${kstTime(x.run.at)}에 시작한 세션의 기록이 ${kstTime(act)} 뒤로 그대로예요(세션 ${x.run.sid}). 권한 창에서 기다리거나 멈춘 것 같아요. 2시간이 넘으면 실행기가 끄고 «멈췄어요»로 알려요.` });
+    } else {
+      const b = beats[x.run.pc];
+      const last = Math.max((b && b.at) || 0, x.run.at || 0);
+      if (now - last > STALL) out.push({ key: `beat:${x.run.n}`, head: `시킨 일 연락 끊김: ${what} — ${x.run.pc} PC 실행기, ${mins(now - last)}째`,
+        body: `${x.run.pc} PC가 꺼졌거나 잠들었거나 실행기가 죽은 것 같아요(마지막 신호 ${b && b.at ? kstTime(b.at) : '없음'}). 그 PC를 켜면 실행기가 «멈췄어요»로 정리해요. 급하면 체크를 풀고 다른 PC로 다시 시켜 주세요.` });
+    }
+  }
+  return out;
+}
+// 예약 작업(이 PC 디스크 기록) 판정. 모듈이 아직 안 내려온 PC면 빈 목록
+function schedChecks(now) {
+  const mod = path.join(ROOT, '클로드작업', '도구', '예약작업', '현황', '멈춤감시.js');
+  if (!fs.existsSync(mod)) return [];
+  delete require.cache[require.resolve(mod)]; // OneDrive로 새 판이 오면 다음 검사부터 새 판
+  return require(mod).stalledScheduled({ now, fake: WATCH_FAKE }).map((s) => ({
+    key: s.key, head: `예약 작업 멈춤: «${s.fake ? s.title : schedTitle(s.task)}» — ${PC}, ${mins(now - s.last)}째 움직임 없음`,
+    body: `${kstTime(s.started)}에 시작한 실행이 ${kstTime(s.last)} 뒤로 멈춰 있어요(도구를 부르던 중에 끊겼거나 기다리는 중). 예약 작업 목록엔 «성공»으로 뜰 수도 있어요. 다시 돌리려면 앱 «예약 작업»에서 그 작업 «지금 실행»(세션 ${s.sid}).`,
+  }));
+}
+let watchBusy = false;
+function watchTick(all) {
+  if (watchBusy) return;
+  watchBusy = true;
+  try {
+    const now = Date.now();
+    if (!all) { try { all = readAll(); } catch (e) { log('멈춤 감시 읽기 실패: ' + e.message.slice(0, 120)); return; } }
+    let beats = {};
+    try { beats = JSON.parse(fbcli(['database:get', `/users/${UID}/ideaRunners`]).trim() || 'null') || {}; } catch (e) {}
+    const list = stallChecks(all, beats, now);
+    try { list.push(...schedChecks(now)); } catch (e) { log('예약 작업 멈춤 감시 실패: ' + String(e.message || e).slice(0, 160)); }
+    for (const w of list) warnOnce(w.key, w.head, w.body);
+  } finally { watchBusy = false; }
+}
+
 // 이 실행기가 지금 돌리는(또는 가져가는 중인) 일: 표 n → 쪽지 id. 2개까지(MAX).
 // «멈췄어요» 판정은 이 표들 전부를 봐야 한다 — 표 하나만 보면 두 번째 일을 남의 멈춘 일로 꺼 버린다.
 const running = new Map();
@@ -376,6 +486,33 @@ async function startOne(id, x) {
   });
 }
 
+// 멈춤 감시 시험(2026-11-20):
+//   --watch-test  가짜 쪽지·켜짐 신호로 판정만 출력(아무 데도 안 씀). 맞으면 종료 코드 0
+//   --watch-only  잠금·시키기 없이 멈춤 감시만 한 번 진짜로(알림 쪽지를 씀). --watch-fake N 과 같이 쓰면 가짜 예약 멈춤 하나를 더함
+if (process.argv.includes('--watch-test')) {
+  const now = Date.now(), M = 60e3;
+  const all = {
+    a: { t: '안 가져간 일', go: 1, run: { pc: 'USER', n: 'wait', at: now - 40 * M } }, // 알림
+    b: { t: '막 시킨 일', go: 1, run: { pc: 'USER', n: 'wait', at: now - 5 * M } }, // 아직
+    c: { t: '내 PC 멈춘 일', go: 1, run: { pc: PC, n: 'aaaa1111', at: now - 50 * M, sid: 'S1' } }, // 알림(기록 45분 전)
+    d: { t: '내 PC 도는 일', go: 1, run: { pc: PC, n: 'bbbb2222', at: now - 50 * M, sid: 'S2' } }, // 아직(기록 2분 전)
+    e: { t: '학교 PC 끊긴 일', go: 1, run: { pc: '신영현-학생자치', n: 'cccc3333', at: now - 60 * M } }, // 알림(신호 40분 전)
+    f: { t: 'USER 도는 일', go: 1, run: { pc: 'USER', n: 'dddd4444', at: now - 60 * M } }, // 아직(신호 1분 전)
+    g: { t: '끝난 일', st: 'done', go: 1, run: { pc: 'USER', n: 'wait', at: now - 90 * M } }, // 빼기
+    h: { t: '남의 PC 표, 내 실행기 것 아님', go: 1, run: { pc: PC, n: 'eeee5555', at: now - 50 * M, sid: 'S3' } }, // 빼기(step이 내려놓음)
+  };
+  const beats = { '신영현-학생자치': { at: now - 40 * M }, USER: { at: now - 1 * M } };
+  const mineR = new Map([['aaaa1111', 'c'], ['bbbb2222', 'd']]);
+  const act = (sid) => ({ S1: now - 45 * M, S2: now - 2 * M }[sid] || 0);
+  const got = stallChecks(all, beats, now, mineR, act).map((w) => w.key);
+  const want = [`wait:a:${now - 40 * M}`, 'run:aaaa1111', 'beat:cccc3333'];
+  stallChecks(all, beats, now, mineR, act).forEach((w) => console.log('알림:', w.head));
+  const ok = got.length === want.length && want.every((k) => got.includes(k));
+  console.log(ok ? '판정 시험 통과' : `판정 시험 실패: 받은 ${JSON.stringify(got)}`);
+  process.exit(ok ? 0 : 1);
+}
+if (process.argv.includes('--watch-only')) { watchTick(); process.exit(0); }
+
 (async () => {
   if (!DRY && !takeLock()) { if (ONCE) console.log('이 PC에서 실행기가 이미 돌고 있어요'); return; } // 이미 도는 중
   if (!DRY) { await sleep(400 + Math.random() * 600); if (lockPid() !== process.pid) return; } // 같은 순간에 켜진 다른 실행기가 잠금을 가져갔으면 물러남
@@ -385,8 +522,9 @@ async function startOne(id, x) {
   if (!DRY) beat();
   asksTick();
   await tick();
-  if (ONCE || DRY) { if (!running.size) process.exit(0); return; }
+  if (ONCE || DRY) { watchTick(); if (!running.size) process.exit(0); return; }
   setInterval(tick, EVERY);
   setInterval(beat, EVERY);
   setInterval(asksTick, ASK_EVERY);
+  setTimeout(() => { watchTick(); setInterval(watchTick, WATCH_EVERY); }, 2 * 60e3); // 켜지자마자 말고 2분 뒤부터(켜짐 신호가 먼저 돌게)
 })();
