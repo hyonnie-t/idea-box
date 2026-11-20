@@ -152,6 +152,34 @@ function beat() {
     fbcli(['database:update', `/users/${UID}/ideaRunners`, q(tmp), '--force']);
   } catch (e) { log('켜짐 신호 실패: ' + e.message.slice(0, 160)); } finally { fs.rmSync(tmp, { force: true }); }
 }
+// 시킨 일 기록(2026-11-20, 출처: 효니 말 «쪽지함 시키기 로그를 내가 보기 편한 방식으로 알려주면 안 돼»):
+// users/{uid}/ideaRunLog/{키} = { id 쪽지, t 첫 줄, pc, at 시작, re 이어서, end 끝난 때, how 끝 모양 }. 앱 «📋 시킨 일 기록» 창이 읽는다.
+// 키: 세션 하나 = 표 n(시작에 쓰고 끝에 end·how를 더함). 내려놓기·돌려보내기는 쪽지·때로 만든 키라 여러 PC가 같이 써도 한 줄.
+// how: reply 답장 남김 · ask 물어봄 · done 효니가 그새 끝냄 · noreply 답장 없이 끝남 · stop 멈춤 · nostart 못 엶 · gone 쪽지 지워짐
+//      · drop 멈춘 일 내려놓음 · late 고른 PC가 안 가져감 · nopc PC 안 고른 시키기. 30일 지난 줄은 1시간마다 지운다.
+const LOG_BASE = `/users/${UID}/ideaRunLog`;
+const LOG_KEEP = 30 * 86400e3;
+function runLog(key, part) {
+  if (DRY || !/^[\w-]+$/.test(key)) return;
+  const tmp = path.join(os.tmpdir(), `ideabox-runlog-${key}.json`);
+  try { fs.writeFileSync(tmp, JSON.stringify(part)); fbcli(['database:update', q(`${LOG_BASE}/${key}`), q(tmp), '--force']); }
+  catch (e) { log(`기록 쓰기 실패(${key}): ${String(e.message || e).slice(0, 120)}`); } finally { fs.rmSync(tmp, { force: true }); }
+}
+let pruneAt = 0;
+function pruneLog() {
+  if (DRY || Date.now() - pruneAt < 3600e3) return;
+  pruneAt = Date.now();
+  const tmp = path.join(os.tmpdir(), 'ideabox-runlog-prune.json');
+  try {
+    const all = JSON.parse(fbcli(['database:get', LOG_BASE]).trim() || 'null') || {};
+    const old = Object.entries(all).filter(([, v]) => !v || Date.now() - (v.end || v.at || 0) > LOG_KEEP).map(([k]) => [k, null]);
+    if (!old.length) return;
+    fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(old)));
+    fbcli(['database:update', LOG_BASE, q(tmp), '--force']);
+    log(`지난 기록 ${old.length}줄 지움`);
+  } catch (e) { log('지난 기록 지우기 실패: ' + String(e.message || e).slice(0, 120)); } finally { fs.rmSync(tmp, { force: true }); }
+}
+const logT = (x) => firstLine(x && x.t).slice(0, 60) || '(사진 쪽지)';
 const isWait = (x) => !!x.run && x.run.n === 'wait'; // 앱이 «이 PC에서 해 줘»라고 적어 둔 것(아직 아무도 안 가져감)
 // 내 일: 효니가 이 PC를 고른 쪽지만. PC를 안 고른 시키기(go만, 옛 화면)는 아무 PC도 가져가지 않고 «앱을 다시 열고 체크»로 돌려보낸다
 // (2026-11-18, 출처: 효니 말 «쪽지함에서 일 시키면 컴퓨터 고르게 한다고 하지 않았냐», 이 PC를 쓰지도 않는데 학교 PC가 먼저 보던 일)
@@ -212,6 +240,7 @@ function asksTick() {
     if (s.add || s.close || s.reopen || s.write || s.missing || blockedLine !== lastBlocked || ONCE || DRY) log((DRY ? '(dry) ' : '') + line);
     lastBlocked = blockedLine;
   } catch (e) { log('물을 것 맞추기 실패: ' + String(e.message || e).slice(0, 160)); } finally { asksBusy = false; }
+  pruneLog(); // 1시간에 한 번만 실제로 돈다
 }
 
 // 이 실행기가 지금 돌리는(또는 가져가는 중인) 일: 표 n → 쪽지 id. 2개까지(MAX).
@@ -240,6 +269,7 @@ async function step() {
       if (now - (x.run.at || 0) > STALE && x.st !== 'done' && !DRY) {
         log(`${id} 고른 PC(${x.run.pc})가 안 가져감 — 내려놓음`);
         try { patch(id, { run: null, go: null, st: 'seen', re: `${x.run.pc} PC가 시작하지 못했어요(꺼져 있거나 클로드를 못 엶). 다시 체크해서 켜진 PC를 골라 주세요.`, rat: now, rep: now }); } catch (e) {}
+        runLog(`l${id}${x.run.at || 0}`, { id, t: logT(x), pc: x.run.pc, at: x.run.at || now, end: now, how: 'late' });
       }
       continue;
     }
@@ -251,6 +281,8 @@ async function step() {
     if (stale && x.st !== 'done' && !DRY) {
       log(`${id} 멈춘 일 내려놓음(맡은 PC ${x.run.pc})`);
       try { patch(id, { run: null, go: null, st: 'seen', re: `중간에 멈췄어요(${x.run.pc} PC가 꺼졌거나 끊김). 다시 체크하면 다시 할게요.`, rat: now, rep: now }); } catch (e) {}
+      // 그 세션의 시작 줄(키 = 표 n)이 있으면 그 줄을 닫고, 없으면(옛 판이 연 일) 따로 한 줄
+      runLog(/^[0-9a-f]{8}$/.test(x.run.n || '') ? x.run.n : `d${id}${x.run.at || 0}`, { id, t: logT(x), pc: x.run.pc, at: x.run.at || now, end: now, how: 'drop' });
     }
   }
   for (const [id, x] of Object.entries(all)) {
@@ -259,6 +291,7 @@ async function step() {
     log(`${id} PC를 안 고른 시키기 — 돌려보냄`);
     // st는 그대로(새 쪽지면 받아 두기가 계속 읽게). 같은 순간 옛 실행기가 run을 썼다면 그쪽이 go 없음을 보고 스스로 내려놓는다
     try { patch(id, { go: null, again: null, re: NO_PICK_RE, rat: now, rep: now }); } catch (e) {}
+    runLog(`p${id}${x.go || 0}`, { id, t: logT(x), at: x.go || now, end: now, how: 'nopc' });
   }
   const todo = Object.entries(all).filter(([, x]) => mine(x)).sort((a, b) => a[1].go - b[1].go);
   if (!todo.length) return;
@@ -298,6 +331,7 @@ async function startOne(id, x) {
   // 물을 것이면 효니 답을 출처 파일에 먼저 적어 둔다(10분 맞추기를 기다리지 않게)
   if (x.src && x.a) { try { log(`${id} 답 적기: ${require('./asks.js').writeOne(id, x)}`); } catch (e) { log(`${id} 답 적기 실패: ${String(e.message || e).slice(0, 160)}`); } }
   log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
+  runLog(n, { id, t: logT(x), pc: PC, at: Date.now(), ...(resume ? { re: true } : {}) });
   const args = ['-p', prompt(id, resume, x), '--permission-mode', 'auto', '--output-format', 'json',
     '-n', `💌 ${firstLine(x.t).slice(0, 24) || '쪽지 ' + id}`, ...(resume ? ['--resume', sid] : ['--session-id', sid])];
   // IDEABOX_AUTO: 세션 안 inbox.js가 done을 답장으로 바꾸고 rep(보고)를 찍는다
@@ -314,8 +348,13 @@ async function startOne(id, x) {
     let result = '';
     try { result = JSON.parse(out).result || ''; } catch (e) { result = out.trim().slice(-400); }
     log(`${id} 끝(코드 ${code})${err ? ' 오류: ' + err.trim().slice(-200) : ''}`);
+    let how = code === 0 ? 'reply' : 'stop';
     try {
       const after = readOne(id);
+      if (!after) how = 'gone';
+      else if (after.st === 'done') how = 'done';
+      else if (after.run?.n === n) how = /ENOENT/.test(err) ? 'nostart' : code === 0 && result ? 'noreply' : 'stop';
+      else if (after.ask) how = 'ask';
       if (after && after.st === 'done') patch(id, { run: null, go: null, sid, spc: PC }); // 효니가 그새 «끝남»으로 닫음 → 상태는 그대로
       else if (after && after.run?.n === n) {
         // 세션이 inbox.js로 답장을 남기지 않음 → 마지막 말을 답장으로 남기고 내려놓기
@@ -328,6 +367,7 @@ async function startOne(id, x) {
         patch(id, { run: null, go: null, st: 'seen', re, rat: Date.now(), rep: Date.now(), ...(noStart ? {} : { sid, spc: PC }) });
       } else if (after) patch(id, { sid, spc: PC });
     } catch (e) { log(`${id} 마무리 쓰기 실패: ${e.message.slice(0, 160)}`); }
+    runLog(n, { end: Date.now(), how, code: code ?? null });
     // 마무리를 쓴 뒤에 표를 뺀다(firebase 쓰기는 동기라 그 사이 tick이 끼지 않지만, 순서로도 «내 일»이 남의 멈춘 일로 보이지 않게)
     running.delete(n);
     if (ONCE) { if (!running.size) process.exit(0); return; }
