@@ -1068,7 +1068,7 @@ async function pickPc() {
 const HOW = {
   reply: ['✅', '답장을 남겼어요'], ask: ['❓', '효니에게 물어봤어요'], done: ['☑️', '하는 사이 효니가 끝냈어요'],
   noreply: ['💬', '답장 없이 끝나 마지막 말을 대신 남겼어요'], stop: ['⚠️', '중간에 멈췄어요'], nostart: ['⛔', '클로드를 열지 못해 시작 못 했어요'],
-  gone: ['🗑️', '하는 사이 쪽지가 지워졌어요'], drop: ['⚠️', '멈춘 채 남아 내려놓았어요'], late: ['⏰', '고른 PC가 4시간 안에 안 가져갔어요'],
+  gone: ['🗑️', '하는 사이 쪽지가 지워졌어요'], drop: ['⚠️', 'PC가 꺼졌거나 끊겨 멈췄어요'], late: ['⏰', '고른 PC가 4시간 안에 안 가져갔어요'],
   nopc: ['↩️', 'PC를 안 골라 돌려보냈어요'],
 };
 const dur = (ms) => (ms < 60e3 ? '1분 안' : ms < 3600e3 ? `${Math.round(ms / 60e3)}분` : `${Math.floor(ms / 3600e3)}시간${Math.round((ms % 3600e3) / 60e3) ? ` ${Math.round((ms % 3600e3) / 60e3)}분` : ''}`);
@@ -1109,6 +1109,7 @@ function runLogHtml(log, rs) {
   // 기록 줄: 최근 것부터, 날짜별
   const rows = Object.entries(log).filter(([, v]) => v && v.at).map(([k, v]) => ({ ...v, k })).sort((a, b) => b.at - a.at);
   let lastDay = '';
+  const shownRe = new Set(); // 답장 첫 줄은 그 쪽지의 가장 최근 줄에만(옛 줄에 나중 답장이 붙지 않게)
   const items = rows.map((v) => {
     const x = ideas[v.id];
     let ico, st;
@@ -1116,7 +1117,8 @@ function runLogHtml(log, rs) {
     else if (x && isRun(x) && x.run.n === v.k) { ico = '⏳'; st = `하는 중 · ${dur(now - v.at)}째`; }
     else { ico = '❔'; st = '끝난 기록이 없어요(PC가 꺼졌을 수 있어요)'; }
     const took = v.end && v.how !== 'nopc' && v.how !== 'late' ? ` · ${dur(v.end - v.at)} 걸림` : '';
-    const re = x && (v.how === 'reply' || v.how === 'noreply' || v.how === 'ask') ? firstLine(lastClaude(x)?.x || '') : '';
+    const re = x && !shownRe.has(v.id) && (v.how === 'reply' || v.how === 'noreply' || v.how === 'ask') ? firstLine(lastClaude(x)?.x || '') : '';
+    shownRe.add(v.id);
     const open = x && canReply(x);
     const day = dayName(v.at);
     const head = day !== lastDay ? `<li class="lg-day">${day}</li>` : '';

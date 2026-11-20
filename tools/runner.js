@@ -331,7 +331,8 @@ async function startOne(id, x) {
   // 물을 것이면 효니 답을 출처 파일에 먼저 적어 둔다(10분 맞추기를 기다리지 않게)
   if (x.src && x.a) { try { log(`${id} 답 적기: ${require('./asks.js').writeOne(id, x)}`); } catch (e) { log(`${id} 답 적기 실패: ${String(e.message || e).slice(0, 160)}`); } }
   log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
-  runLog(n, { id, t: logT(x), pc: PC, at: Date.now(), ...(resume ? { re: true } : {}) });
+  const logHead = { id, t: logT(x), pc: PC, at: Date.now(), ...(resume ? { re: true } : {}) };
+  runLog(n, logHead);
   const args = ['-p', prompt(id, resume, x), '--permission-mode', 'auto', '--output-format', 'json',
     '-n', `💌 ${firstLine(x.t).slice(0, 24) || '쪽지 ' + id}`, ...(resume ? ['--resume', sid] : ['--session-id', sid])];
   // IDEABOX_AUTO: 세션 안 inbox.js가 done을 답장으로 바꾸고 rep(보고)를 찍는다
@@ -367,7 +368,7 @@ async function startOne(id, x) {
         patch(id, { run: null, go: null, st: 'seen', re, rat: Date.now(), rep: Date.now(), ...(noStart ? {} : { sid, spc: PC }) });
       } else if (after) patch(id, { sid, spc: PC });
     } catch (e) { log(`${id} 마무리 쓰기 실패: ${e.message.slice(0, 160)}`); }
-    runLog(n, { end: Date.now(), how, code: code ?? null });
+    runLog(n, { ...logHead, end: Date.now(), how, code: code ?? null }); // 시작 줄 쓰기가 실패했어도 끝 줄만으로 한 줄이 되게
     // 마무리를 쓴 뒤에 표를 뺀다(firebase 쓰기는 동기라 그 사이 tick이 끼지 않지만, 순서로도 «내 일»이 남의 멈춘 일로 보이지 않게)
     running.delete(n);
     if (ONCE) { if (!running.size) process.exit(0); return; }
