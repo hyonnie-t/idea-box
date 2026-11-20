@@ -78,7 +78,7 @@ function demoStore() {
     d4: { t: '책장 표지 색을 좀 더 따뜻하게 바꾸고 싶어', at: now - 86400e3 * 3, tag: '책장', st: 'seen', ask: true, again: true, re: '두 가지만 정해 주세요.\n① «따뜻하게»는 어느 쪽이에요? [귤색 / 바랜 종이색 / 둘 다 섞기]\n② 다크 모드도 같이 바꿀까요? [같이 / 밝은 화면만]', rat: now - 86400e3 * 2 },
     d5: { t: '시간표 위젯 글씨가 작아\n폰에서 보면 한눈에 안 들어와', at: now - 86400e3 * 4, tag: '시간표', st: 'seen', re: '좋아요. 18px로 키워 두고 작업 현황에 올렸어요.', rat: now - 86400e3 * 2,
       th: { m1: { w: 'c', x: '얼마나 키울까요? [16px / 18px / 20px]', at: now - 86400e3 * 3, q: true }, m2: { w: 'h', x: '18px', at: now - 86400e3 * 2.5 }, m3: { w: 'c', x: '좋아요. 18px로 키워 두고 작업 현황에 올렸어요.', at: now - 86400e3 * 2 } }, hat: now - 86400e3 * 2.5 },
-    d8: { t: '책장 앱 검색창 글씨 크기 키워 줘', at: now - 3600e3 * 3, tag: '책장', st: 'seen', go: now - 600e3, run: { pc: 'CHAN', at: now - 300e3 } },
+    d8: { t: '책장 앱 검색창 글씨 크기 키워 줘', at: now - 3600e3 * 3, tag: '책장', st: 'seen', go: now - 600e3, run: { pc: 'CHAN', at: now - 300e3, n: 'aa11bb22' } },
     // 시킨 일이 끝나 보고한 것(rep) — 열면 «🔔 클로드가 다 했어요» 창
     d10: { t: '전세 대출 최대 한도 계산해 줘', at: now - 3600e3 * 7, tag: '일반', st: 'seen', rep: now - 120e3, sid: 'demo', spc: 'CHAN', re: '최대 3억 2천만 원까지 가능해요.\n① 은행 전세대출 2억 4천\n② 공제회 신용대출 8천\n계산 파일: 클로드작업/산출물/개인생활/전세한도.md', rat: now - 120e3 },
     d6: { t: '쪽지함 도구 정리', at: now - 86400e3 * 6, tag: '도구', st: 'done', re: '정리했어요.', rat: now - 86400e3 * 5 },
@@ -125,6 +125,20 @@ function demoStore() {
     async dropPics(id, keys) { for (const k of keys) delete pics[id]?.[k]; },
     async getPic(id, k, size) { await wait(); return pics[id]?.[k]?.[size] || ''; },
     // 데모 PC 셋: 켜짐 / 켜졌지만 클로드를 못 엶 / 꺼짐. ?demo=1&nopc=1 이면 켜진 PC 없음
+    // 시킨 일 기록(tools/runner.js가 쓰는 꼴): 하는 중 d8 · 답장 d10 · 물어봄 d4 · 멈춤 · 어제 끝남 · 돌려보냄 · 지운 쪽지
+    async runLog() {
+      await wait();
+      const t = Date.now();
+      return {
+        aa11bb22: { id: 'd8', t: '책장 앱 검색창 글씨 크기 키워 줘', pc: 'CHAN', at: t - 300e3 },
+        aa11bb23: { id: 'd10', t: '전세 대출 최대 한도 계산해 줘', pc: 'CHAN', at: t - 900e3, end: t - 120e3, how: 'reply', code: 0 },
+        aa11bb24: { id: 'd4', t: '책장 표지 색을 좀 더 따뜻하게 바꾸고 싶어', pc: '신영현-학생자치', at: t - 3600e3 * 3, end: t - 3600e3 * 2.8, how: 'ask', code: 0 },
+        aa11bb25: { id: 'd5', t: '시간표 위젯 글씨가 작아', pc: 'CHAN', at: t - 3600e3 * 5, end: t - 3600e3 * 4.9, how: 'stop', code: 1, re: true },
+        aa11bb26: { id: 'd6', t: '쪽지함 도구 정리', pc: 'USER', at: t - 86400e3 - 3600e3, end: t - 86400e3 - 1800e3, how: 'reply', code: 0 },
+        pd2x: { id: 'd2', t: '시간표 앱 할 일 탭에 «이번 주만 보기» 단추가 있으면 좋겠다', at: t - 86400e3 * 2, end: t - 86400e3 * 2 + 60e3, how: 'nopc' },
+        aa11bb27: { id: 'gone1', t: '지운 쪽지(예전 일)', pc: 'CHAN', at: t - 86400e3 * 3, end: t - 86400e3 * 3 + 600e3, how: 'gone', code: 0 },
+      };
+    },
     async runners() { await wait(); const t = Date.now(); return { CHAN: { at: new URLSearchParams(location.search).has('nopc') ? t - 7200e3 : t - 20e3, ok: true }, '신영현-학생자치': { at: t - 40e3, ok: false, why: 'claude 명령을 찾지 못해요' }, USER: { at: t - 86400e3 * 2, ok: true } }; },
   };
 }
@@ -160,7 +174,7 @@ async function start() {
 }
 function offlineStore() {
   const no = () => Promise.reject(new Error('offline'));
-  return { offline: true, async watch(cb) { cb({}); }, create: no, patch: no, remove: no, putPics: no, dropPics: no, getPic: no, runners: no };
+  return { offline: true, async watch(cb) { cb({}); }, create: no, patch: no, remove: no, putPics: no, dropPics: no, getPic: no, runners: no, runLog: no };
 }
 
 function gate(msg = '') {
@@ -177,6 +191,7 @@ async function open(s) {
   $('#gate').hidden = true;
   $('#content').hidden = false;
   $('#signout').hidden = isDemo;
+  $('#runlog-open').hidden = false;
   try {
     await store.watch((v) => { ideas = buryDeleted(v); gotData = !store.offline; /* 끊긴 채 연 빈 자료로는 처음 접기 기본값을 정하지 않음 */ if (!isDemo && !store.offline) status(''); render(); flush(); maybeReport(); }, () => status('쪽지를 불러오지 못했어요. 새로고침해 주세요.'));
   } catch (e) { status('쪽지를 불러오지 못했어요. 인터넷을 확인해 주세요.'); }
@@ -197,6 +212,10 @@ function bind() {
   });
   $('#signout').addEventListener('click', async () => { await fb.signOut(); location.reload(); });
   $('#refresh').addEventListener('click', hardRefresh);
+  $('#runlog-open').addEventListener('click', openRunLog);
+  $('#runlog-again').addEventListener('click', openRunLog);
+  $('#runlog-close').addEventListener('click', () => $('#runlog').close());
+  $('#runlog-body').addEventListener('click', onRunLogClick);
   $('#compose').addEventListener('submit', (e) => { e.preventDefault(); send(); });
   const t = $('#t');
   t.addEventListener('input', () => { grow(t); saveDraft(); });
@@ -1044,6 +1063,87 @@ async function pickPc() {
     d.showModal();
     ($('#pick-list button:not([disabled])') || $('#pick-no')).focus();
   });
+}
+
+// ---------- «📋 시킨 일» 기록 창 ----------
+// 2026-11-20, 출처: 효니 말 «쪽지함 시키기 로그를 내가 보기 편한 방식으로 알려주면 안 돼». PC 로그 파일 대신, 실행기가 남긴
+// ideaRunLog(30일치)를 날짜별로 보인다: 언제·어느 PC·무슨 일·어떻게 끝났나·얼마 걸렸나. 맨 위는 PC 상태와 기다리는 일.
+// 열 때 한 번 읽고(실시간 아님), 창 안 «다시 보기»로 다시 읽는다. 줄을 누르면 답할 수 있는 쪽지는 답하기 창.
+const HOW = {
+  reply: ['✅', '답장을 남겼어요'], ask: ['❓', '효니에게 물어봤어요'], done: ['☑️', '하는 사이 효니가 끝냈어요'],
+  noreply: ['💬', '답장 없이 끝나 마지막 말을 대신 남겼어요'], stop: ['⚠️', '중간에 멈췄어요'], nostart: ['⛔', '클로드를 열지 못해 시작 못 했어요'],
+  gone: ['🗑️', '하는 사이 쪽지가 지워졌어요'], drop: ['⚠️', 'PC가 꺼졌거나 끊겨 멈췄어요'], late: ['⏰', '고른 PC가 4시간 안에 안 가져갔어요'],
+  nopc: ['↩️', 'PC를 안 골라 돌려보냈어요'],
+};
+const dur = (ms) => (ms < 60e3 ? '1분 안' : ms < 3600e3 ? `${Math.round(ms / 60e3)}분` : `${Math.floor(ms / 3600e3)}시간${Math.round((ms % 3600e3) / 60e3) ? ` ${Math.round((ms % 3600e3) / 60e3)}분` : ''}`);
+const hm = (ms) => { const d = new Date(ms); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
+function dayName(ms) {
+  const d = new Date(ms), now = new Date();
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400e3);
+  return diff === 0 ? '오늘' : diff === 1 ? '어제' : `${d.getMonth() + 1}월 ${d.getDate()}일 (${'일월화수목금토'[d.getDay()]})`;
+}
+let logLoading = false;
+async function openRunLog() {
+  const d = $('#runlog');
+  if (!d.open) { d.showModal(); $('#runlog-close').focus(); }
+  if (logLoading) return;
+  const body = $('#runlog-body');
+  if (!store || store.offline || !store.runLog) { body.innerHTML = '<p class="pick-help">인터넷이 연결되면 볼 수 있어요.</p>'; return; }
+  body.innerHTML = '<p class="pick-help">불러오는 중…</p>';
+  logLoading = true;
+  let log, rs;
+  try { [log, rs] = await withTimeout(Promise.all([store.runLog(), store.runners()]), 10000); }
+  catch (e) { body.innerHTML = '<p class="pick-help">기록을 불러오지 못했어요. 인터넷을 확인하고 «다시 보기»를 눌러 주세요.</p>'; return; }
+  finally { logLoading = false; }
+  if (d.open) body.innerHTML = runLogHtml(log || {}, rs || {});
+}
+function runLogHtml(log, rs) {
+  const now = Date.now();
+  // PC 상태: 켜짐/꺼짐 · 지금 하는 일 수
+  const pcs = Object.entries(rs).filter(([, r]) => r && r.at).sort((a, b) => b[1].at - a[1].at).map(([pc, r]) => {
+    const live = now - r.at < LIVE;
+    const busy = typeof r.busy === 'number' ? r.busy : pcBusy(pc);
+    const st = !live ? `꺼져 있어요 · ${ago(now - r.at)}` : !r.ok ? `켜졌지만 ${r.why || '클로드를 못 열어요'}` : busy ? `켜짐 · ${busy}개 하는 중${r.max ? ` (한 번에 ${r.max}개까지)` : ''}` : '켜짐 · 쉬는 중';
+    return `<li class="lg-pc${live && r.ok ? '' : ' off'}"><span class="pc-name">💻 ${esc(pc)}</span><span class="pc-st">${esc(st)}</span></li>`;
+  }).join('');
+  // 기다리는 일: PC를 골랐지만 아직 시작 전(기록엔 시작해야 줄이 생김)
+  const waits = Object.entries(ideas).map(([id, x]) => ({ ...x, id })).filter(isWait).sort((a, b) => a.run.at - b.run.at)
+    .map((x) => `<li class="lg-row wait"><span class="lg-time">${hm(x.run.at)}</span><span class="lg-main"><span class="lg-t">${esc(firstLine(x.t) || '(사진 쪽지)')}</span><span class="lg-st">🕒 ${esc(x.run.pc)}에서 시작을 기다려요 · ${dur(now - x.run.at)}째${pcBusy(x.run.pc) ? ` · 앞 일 ${pcBusy(x.run.pc)}개` : ''}</span></span></li>`).join('');
+  // 기록 줄: 최근 것부터, 날짜별
+  const rows = Object.entries(log).filter(([, v]) => v && v.at).map(([k, v]) => ({ ...v, k })).sort((a, b) => b.at - a.at);
+  let lastDay = '';
+  const shownRe = new Set(); // 답장 첫 줄은 그 쪽지의 가장 최근 줄에만(옛 줄에 나중 답장이 붙지 않게)
+  const items = rows.map((v) => {
+    const x = ideas[v.id];
+    let ico, st;
+    if (v.how) { [ico, st] = HOW[v.how] || ['•', v.how]; if (v.how === 'stop' && v.code != null) st += `(코드 ${v.code})`; }
+    else if (x && isRun(x) && x.run.n === v.k) { ico = '⏳'; st = `하는 중 · ${dur(now - v.at)}째`; }
+    else { ico = '❔'; st = '끝난 기록이 없어요(PC가 꺼졌을 수 있어요)'; }
+    const took = v.end && v.how !== 'nopc' && v.how !== 'late' ? ` · ${dur(v.end - v.at)} 걸림` : '';
+    const re = x && !shownRe.has(v.id) && (v.how === 'reply' || v.how === 'noreply' || v.how === 'ask') ? firstLine(lastClaude(x)?.x || '') : '';
+    shownRe.add(v.id);
+    const open = x && canReply(x);
+    const day = dayName(v.at);
+    const head = day !== lastDay ? `<li class="lg-day">${day}</li>` : '';
+    lastDay = day;
+    const inner = `<span class="lg-time">${hm(v.at)}</span><span class="lg-main"><span class="lg-t">${esc(v.t || '(제목 없음)')}</span>`
+      + `<span class="lg-st">${ico} ${esc(st)}${took}${v.pc ? ` · ${esc(v.pc)}` : ''}${v.re ? ' · 이어서' : ''}</span>`
+      + `${re ? `<span class="lg-re">${esc(re)}</span>` : ''}${!x ? '<span class="lg-gone">지운 쪽지</span>' : ''}</span>`;
+    return head + (open ? `<li class="lg-row"><button type="button" class="lg-btn" data-lid="${esc(v.id)}" aria-label="${esc(v.t || '')} 답하기 창 열기">${inner}<span class="lg-go" aria-hidden="true">›</span></button></li>` : `<li class="lg-row">${inner}</li>`);
+  }).join('');
+  return `${pcs ? `<h3 class="lg-h">PC</h3><ul class="lg-pcs">${pcs}</ul>` : ''}`
+    + `${waits ? `<h3 class="lg-h">시작을 기다리는 일</h3><ul class="lg-list">${waits}</ul>` : ''}`
+    + `<h3 class="lg-h">기록 <span class="lg-note">최근 30일</span></h3>`
+    + (items ? `<ul class="lg-list">${items}</ul>` : '<p class="pick-help">아직 기록이 없어요. 2026-11-20 이후 시킨 일부터 쌓여요.</p>');
+}
+function onRunLogClick(e) {
+  const b = e.target.closest('button[data-lid]');
+  if (!b) return;
+  const x = ideas[b.dataset.lid];
+  if (!x || !canReply(x)) return toast('이 쪽지는 지금 답할 수 없어요.');
+  $('#runlog').close();
+  openReply(b.dataset.lid);
 }
 
 // ---------- «클로드가 다 했어요» 보고 창 ----------
