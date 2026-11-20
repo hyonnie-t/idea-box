@@ -706,6 +706,8 @@ function rego(cur, now) {
 function planGo(x, pc) { const now = Date.now(); return { patch: { go: now, again: null, run: { pc, at: now, n: 'wait' } }, undo: { go: null, again: x.again || null, run: null } }; }
 function planStop(x) { return { patch: { go: null, run: null }, undo: { go: x.go || null, run: x.run || null } }; }
 
+// 빈 화면 그림(장식이라 alt 비움, 글이 뜻을 말함)
+const emptyArt = (f) => `<img class="empty-art" src="img/${f}" alt="" width="480" height="480" decoding="async">`;
 function renderBoard(found, fresh, everything = found) {
   const searching = !!query.trim();
   // 물을 것(src)은 끝난 것을 안 보임(원본 파일이 기록). 거르기 칩 숫자는 판에 실제로 보일 수 있는 것만 센다.
@@ -714,7 +716,8 @@ function renderBoard(found, fresh, everything = found) {
   const n = (f) => pool.filter((x) => passF(f, x)).length;
   $('#filters').innerHTML = FILTERS.map(([f, label]) => `<button type="button" class="fchip" data-f="${f}" aria-pressed="${f === filter}">${label} <b>${n(f)}</b></button>`).join('');
   const total = everything.filter(visible).length;
-  $('#board-sum').innerHTML = !total ? '아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.'
+  $('#board-sum').classList.toggle('sum-empty', !total);
+  $('#board-sum').innerHTML = !total ? `${emptyArt('ideabox-empty.webp')}<span>아직 쪽지가 없어요. 떠오르는 생각을 위에 적어 보세요.</span>`
     : searching ? '' // 찾은 수는 아래에서 판에 실제로 그린 줄 수로
     : '<span class="sum-help">☑ 체크 = 클로드에게 시키기. 줄을 누르면 펼쳐져 고치기·끝남으로가 나와요.</span>';
   // 거르기마다: 줄 목록(todo)과 «끝낸 것»(done). 할 것 = 안 끝난 것 + 끝낸 것은 접어 둠, 끝남·전체 = 끝낸 것을 펴서.
@@ -741,7 +744,8 @@ function renderBoard(found, fresh, everything = found) {
   const keep = a && box.contains(a) ? { id: a.closest('[data-id]')?.dataset.id, tag: a.closest('.group')?.dataset.tag, act: a.dataset.act } : null;
   const emptyMsg = searching ? '찾는 말이 들어간 쪽지가 여기엔 없어요.'
     : filter === 'me' ? '지금 내 차례인 쪽지는 없어요 🎉' : filter === 'cl' ? '클로드에게 시킨 일이 없어요.' : filter === 'done' ? '끝낸 쪽지가 없어요.' : '';
-  box.innerHTML = show.map((g) => group(g, searching, dday)).join('') || (total && emptyMsg ? `<p class="empty">${emptyMsg}</p>` : '');
+  const emptyPic = !searching && filter === 'me' ? 'ideabox-myturn-empty.webp' : 'ideabox-empty.webp';
+  box.innerHTML = show.map((g) => group(g, searching, dday)).join('') || (total && emptyMsg ? `<div class="empty">${emptyArt(emptyPic)}<p>${emptyMsg}</p></div>` : '');
   // 찾는 중엔 끝낸 것도 펴서 보이므로, 찾은 수 = 그린 줄 수
   if (searching && total) $('#board-sum').innerHTML = `<span class="sum-find">🔎 «${esc(query.trim())}» 찾은 것 <b>${box.querySelectorAll('.trow').length}</b></span>`;
   // 모두 접기/펴기: 보이는 묶음이 둘 이상일 때만
