@@ -341,6 +341,21 @@ function schedChecks(now) {
     body: `${kstTime(s.started)}에 시작한 실행이 ${kstTime(s.last)} 뒤로 멈춰 있어요(도구를 부르던 중에 끊겼거나 기다리는 중). 예약 작업 목록엔 «성공»으로 뜰 수도 있어요. 다시 돌리려면 앱 «예약 작업»에서 그 작업 «지금 실행»(세션 ${s.sid}).`,
   }));
 }
+// 현황 올리기(2026-11-20, 출처: 효니 말 «응, 모아줘»): 이 PC 열린 세션·예약 작업 상태를 앱 «📋 시킨 일» 창으로(tools/boards.js). 5분마다, 바뀐 것만 쓴다.
+const BOARD_EVERY = 5 * 60e3;
+function boardsTick() {
+  try {
+    const tmp = path.join(os.tmpdir(), 'ideabox-run-boards.json');
+    const fb = {
+      get: (p) => JSON.parse(fbcli(['database:get', q(p)]).trim() || 'null'),
+      // PC 이름(한글일 수 있음)은 명령줄이 아니라 파일 안 열쇠로
+      update: (p, obj) => { fs.writeFileSync(tmp, JSON.stringify(obj)); try { fbcli(['database:update', q(p), q(tmp), '--force']); } finally { fs.rmSync(tmp, { force: true }); } },
+    };
+    const r = require('./boards.js').sync({ root: ROOT, pc: PC, uid: UID, fb, dry: DRY });
+    if (DRY) log('(dry) 현황 올릴 것: ' + JSON.stringify(r).slice(0, 400));
+    else if (r.sched === 'wrote') log('현황: 예약 작업 상태 올림');
+  } catch (e) { log('현황 올리기 실패: ' + String(e.message || e).slice(0, 160)); }
+}
 let watchBusy = false;
 function watchTick(all) {
   if (watchBusy) return;
@@ -516,6 +531,7 @@ if (process.argv.includes('--watch-test')) {
   process.exit(ok ? 0 : 1);
 }
 if (process.argv.includes('--watch-only')) { watchTick(); process.exit(0); }
+if (process.argv.includes('--boards-only')) { boardsTick(); process.exit(0); } // 현황만 한 번 진짜로 올림(잠금·시키기 없음)
 
 (async () => {
   if (!DRY && !takeLock()) { if (ONCE) console.log('이 PC에서 실행기가 이미 돌고 있어요'); return; } // 이미 도는 중
@@ -525,10 +541,12 @@ if (process.argv.includes('--watch-only')) { watchTick(); process.exit(0); }
   log(`실행기 켜짐 (${ROOT})${canRun.ok ? '' : ` — ${canRun.why}, 쪽지를 가져가지 않아요`}`);
   if (!DRY) beat();
   asksTick();
+  boardsTick();
   await tick();
   if (ONCE || DRY) { watchTick(); if (!running.size) process.exit(0); return; }
   setInterval(tick, EVERY);
   setInterval(beat, EVERY);
   setInterval(asksTick, ASK_EVERY);
+  setInterval(boardsTick, BOARD_EVERY);
   setTimeout(() => { watchTick(); setInterval(watchTick, WATCH_EVERY); }, 2 * 60e3); // 켜지자마자 말고 2분 뒤부터(켜짐 신호가 먼저 돌게)
 })();

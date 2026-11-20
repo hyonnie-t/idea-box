@@ -81,6 +81,8 @@ function demoStore() {
     d8: { t: '책장 앱 검색창 글씨 크기 키워 줘', at: now - 3600e3 * 3, tag: '책장', st: 'seen', go: now - 600e3, run: { pc: 'CHAN', at: now - 300e3, n: 'aa11bb22' } },
     // 시킨 일이 끝나 보고한 것(rep) — 열면 «🔔 클로드가 다 했어요» 창
     d10: { t: '전세 대출 최대 한도 계산해 줘', at: now - 3600e3 * 7, tag: '일반', st: 'seen', rep: now - 120e3, sid: 'demo', spc: 'CHAN', re: '최대 3억 2천만 원까지 가능해요.\n① 은행 전세대출 2억 4천\n② 공제회 신용대출 8천\n계산 파일: 클로드작업/산출물/개인생활/전세한도.md', rat: now - 120e3 },
+    // 멈춤 감시 알림 쪽지(runner.js warnOnce 꼴) — 누르면 «📋 시킨 일·현황» 창
+    d13: { t: '⚠️ 예약 작업 멈춤: «포털 아침 점검» — CHAN, 40분째 움직임 없음', at: now - 1800e3, tag: '도구', st: 'seen', hot: true, re: '8:10에 시작한 실행이 8:20 뒤로 멈춰 있어요.\n\n(멈춤 감시가 남긴 알림이에요. 다시 돌리지는 않았어요. 확인했으면 «끝남으로» 눌러 주세요.)', rat: now - 1800e3, rep: now - 1800e3, warn: { k: 'sdemo1', pc: 'CHAN' } },
     d6: { t: '쪽지함 도구 정리', at: now - 86400e3 * 6, tag: '도구', st: 'done', re: '정리했어요.', rat: now - 86400e3 * 5 },
     // 집·이사(2026-11-18 새 주제)
     d11: { t: '전세 매물 세 곳 비교해 줘\n역까지 10분 안, 보증금 3억 이하', at: now - 3600e3 * 9, tag: '집·이사', st: 'seen', hot: true, re: '세 곳을 표로 정리했어요. 두 번째 집이 보증금·거리 모두 맞아요.', rat: now - 3600e3 * 8 },
@@ -139,6 +141,23 @@ function demoStore() {
         aa11bb27: { id: 'gone1', t: '지운 쪽지(예전 일)', pc: 'CHAN', at: t - 86400e3 * 3, end: t - 86400e3 * 3 + 600e3, how: 'gone', code: 0 },
       };
     },
+    // 현황(tools/boards.js가 올리는 꼴): PC별 열린 세션 · 예약 작업 상태·이번 주 많이 쓴 3
+    async boards() {
+      await wait();
+      const t = Date.now();
+      return {
+        pc: {
+          CHAN: { at: t - 120e3, s: [{ n: '권한 창에서 기다리는 세션', st: 'waiting', u: t - 600e3 }, { n: '쪽지함 현황판 모으기', st: 'busy', u: t - 30e3 }, { n: 'Daily diary 1610', st: 'idle', u: t - 3600e3 }, { n: '포털 아침 점검', st: 'idle', u: t - 7200e3 }] },
+          '신영현-학생자치': { at: t - 3600e3 * 3, s: [{ n: '쿨메신저 새 쪽지 할 일 확인', st: 'idle', u: t - 3600e3 * 4 }] },
+        },
+        sched: {
+          at: t - 1800e3, pcs: { CHAN: t - 1800e3, '신영현-학생자치': t - 86400e3 * 2, USER: t - 86400e3 * 8 },
+          n: { ok: 28, fail: 1, miss: 1, run: 2, plan: 10, end: 23 },
+          bad: [{ t: '교학공 협의회 보고 기안·결과보고 공문', pc: '신영현-학생자치', st: 'fail', at: t - 86400e3 * 3 }, { t: '주간 위키 점검', pc: 'USER', st: 'miss', at: t - 86400e3 }],
+          top: [{ t: '면세 추천템 트래킹', pc: 'CHAN', c: 29.62, m: 73, r: 5 }, { t: '오늘 일지 쓰기', pc: 'CHAN', c: 13.96, m: 41, r: 7 }, { t: '경품 설문 모음+초안', pc: '신영현-학생자치', c: 13.27, m: 38, r: 2 }],
+        },
+      };
+    },
     async runners() { await wait(); const t = Date.now(); return { CHAN: { at: new URLSearchParams(location.search).has('nopc') ? t - 7200e3 : t - 20e3, ok: true }, '신영현-학생자치': { at: t - 40e3, ok: false, why: 'claude 명령을 찾지 못해요' }, USER: { at: t - 86400e3 * 2, ok: true } }; },
   };
 }
@@ -174,7 +193,7 @@ async function start() {
 }
 function offlineStore() {
   const no = () => Promise.reject(new Error('offline'));
-  return { offline: true, async watch(cb) { cb({}); }, create: no, patch: no, remove: no, putPics: no, dropPics: no, getPic: no, runners: no, runLog: no };
+  return { offline: true, async watch(cb) { cb({}); }, create: no, patch: no, remove: no, putPics: no, dropPics: no, getPic: no, runners: no, runLog: no, boards: no };
 }
 
 function gate(msg = '') {
@@ -591,9 +610,10 @@ function renderTurn(items) {
   const item = (x) => {
     const lc = lastClaude(x);
     const kind = isAsk(x) ? (x.src ? ['ask', '❓', `📌 ${x.src.l || '계획'}에서 물어요`] : ['ask', '❓', lc ? firstLine(lc.x) : '클로드가 물어요'])
-      : isRep(x) ? ['rep', '🔔', `다 했어요 · ${lc ? firstLine(lc.x) : ''}`] : ['re', '💬', lc ? firstLine(lc.x) : ''];
+      : isRep(x) && isWarn(x) ? ['rep', '⚠️', '멈춤 감시 알림 · 눌러서 현황 보기']
+      : isRep(x) ? ['rep', '🔔', `답장 왔어요 · ${lc ? firstLine(lc.x) : ''}`] : ['re', '💬', lc ? firstLine(lc.x) : ''];
     return `<li><button type="button" class="turn-item ${kind[0]}" data-tid="${esc(x.id)}">
-      <span class="turn-ico" aria-hidden="true">${kind[1]}</span><span class="turn-txt"><span class="turn-t">${esc(firstLine(x.t) || '(사진 쪽지)')}</span><span class="turn-s">${esc(kind[2])}</span></span><span class="turn-go" aria-hidden="true">답하기</span>
+      <span class="turn-ico" aria-hidden="true">${kind[1]}</span><span class="turn-txt"><span class="turn-t">${esc(firstLine(x.t).replace(/^⚠️\s*/, '') || '(사진 쪽지)')}</span><span class="turn-s">${esc(kind[2])}</span></span><span class="turn-go" aria-hidden="true">${isWarn(x) && !isAsk(x) ? '현황 보기' : '답하기'}</span>
     </button></li>`;
   };
   box.innerHTML = `<h2 class="turn-head">🙋 내 차례 <b>${list.length}</b><span class="turn-help">클로드가 물었거나 답장을 달았어요</span></h2>
@@ -608,13 +628,27 @@ function onTurnClick(e) {
   const x = ideas[id];
   if (!x) return;
   if (x.src) return openSrcAnswer(id, x);
+  if (isWarn(x)) return openRunLog(); // 멈춤 감시 알림은 현황 창으로(2026-11-20)
   if (canReply(x)) return openReply(id);
-  // 답할 말이 없으면 판에서 그 줄을 펼쳐 보여 준다
+  showRow(id); // 답할 말이 없으면 판에서 그 줄을 펼쳐 보여 준다
+}
+// 판에서 쪽지 한 줄을 펼쳐 그 자리로. 거르기·찾기에 가려 있으면 «할 것»(끝난 것은 «전체»)으로 풀고 찾는 말을 지운다.
+function showRow(id) {
+  const x = ideas[id];
+  if (!x) return toast('그새 지워진 쪽지예요.');
   openRows.add(id);
   const k = groupOf(x.tag).key;
   if (closedGroups.delete(k)) ls.set(CLOSED, [...closedGroups]);
   render();
-  $(`#groups [data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  let el = $(`#groups [data-id="${CSS.escape(id)}"]`);
+  if (!el) {
+    filter = x.st === 'done' ? 'all' : 'open';
+    if (query) { query = ''; const qi = $('#q'); if (qi) qi.value = ''; }
+    if (x.st === 'done') openDone.add(k);
+    render();
+    el = $(`#groups [data-id="${CSS.escape(id)}"]`);
+  }
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 // «모두 접기 / 모두 펴기»: 지금 보이는 묶음 모두
 function foldAll() {
@@ -810,7 +844,9 @@ function row(x) {
     : isWait(x) && pcBusy(x.run.pc) ? `<span class="tsub go">🤖 시켰어요 · ${esc(x.run.pc || '')}가 앞 일 ${pcBusy(x.run.pc)}개를 끝내면 시작해요</span>`
     : isWait(x) ? (Date.now() - (x.run.at || 0) > SLOW ? `<span class="tsub wait">⚠️ ${esc(x.run.pc || '')}가 아직 안 가져갔어요 — 체크를 풀고 다시 골라 주세요</span>` : `<span class="tsub go">🤖 시켰어요 · ${esc(x.run.pc || '')}에서 곧 시작해요</span>`)
     : go ? '<span class="tsub go">🤖 시켰어요 · 곧 시작해요</span>'
-    : isRep(x) && !ask && last ? `<span class="tsub rep">🔔 다 했어요 · ${esc(firstLine(last.x))}</span>`
+    // rep는 «다 함»뿐 아니라 멈춤·돌려보냄·멈춤 감시 알림도 알리므로 중립 문구(2026-11-20, 검토자 미해결 낮음 닫음)
+    : isRep(x) && !ask && isWarn(x) ? '<span class="tsub rep">⚠️ 멈춤 감시 알림 · 펼쳐서 «📋 현황 보기»</span>'
+    : isRep(x) && !ask && last ? `<span class="tsub rep">🔔 답장 왔어요 · ${esc(firstLine(last.x))}</span>`
     // 물을 것: 출처와 «답이 없으면», 답했으면 내 답(클로드가 덧붙여 물었으면 그 물음)
     : x.src && !(ask && x.re) ? (x.a ? `<span class="tsub">✍️ 내 답: ${esc(firstLine(x.a))}</span>`
       : `<span class="tsub src">📌 ${esc(x.src.l || '')}${x.src.d ? ` · 답이 없으면 ${esc(x.src.d)}` : ''}</span>`)
@@ -823,7 +859,9 @@ function row(x) {
       ${x.src.d ? `<p class="src-def">답이 없으면: ${esc(x.src.d)}</p>` : ''}
       ${x.a ? `<div class="reply mine"><span class="who">✍️ 내 답</span><p>${esc(x.a)}</p><time>${when(x.aat || x.at)}${x.aw ? ' · 계획 파일에 적음' : ''}</time></div>` : ''}` : '';
   // 물을 것(src)은 답 칸 a로 답한다(계획 파일에 적힘, openSrcAnswer). 일반 쪽지는 클로드 말이 있으면 대화(답하기 창)
-  const editBtn = x.src ? `<button type="button" data-act="edit">${x.a && !ask ? '답 고치기' : '답하기'}</button>`
+  // 멈춤 감시 알림은 «답하기» 자리가 «📋 현황 보기»(단추 수 그대로)
+  const editBtn = isWarn(x) && !done ? '<button type="button" data-act="board">📋 현황 보기</button>'
+    : x.src ? `<button type="button" data-act="edit">${x.a && !ask ? '답 고치기' : '답하기'}</button>`
     : canReply(x) ? '<button type="button" data-act="reply">답하기</button>' : '<button type="button" data-act="edit">고치기</button>';
   const more = expanded ? `<div class="tmore">
       ${rest ? `<p class="text">${esc(rest)}</p>` : ''}
@@ -860,6 +898,7 @@ function onBoardClick(e) {
     openRows.has(id) ? openRows.delete(id) : openRows.add(id);
     return render();
   }
+  if (act === 'board') return openRunLog();
   return onListClick(e); // 사진·고치기·지우기는 카드와 같은 처리
 }
 function onBoardCheck(e) {
@@ -1092,21 +1131,65 @@ async function openRunLog() {
   if (!store || store.offline || !store.runLog) { body.innerHTML = '<p class="pick-help">인터넷이 연결되면 볼 수 있어요.</p>'; return; }
   body.innerHTML = '<p class="pick-help">불러오는 중…</p>';
   logLoading = true;
-  let log, rs;
-  try { [log, rs] = await withTimeout(Promise.all([store.runLog(), store.runners()]), 10000); }
+  let log, rs, bd;
+  // 현황(boards)은 못 읽어도 기록은 보이게 따로 받는다(옛 실행기만 도는 동안엔 비어 있음)
+  try { [log, rs, bd] = await withTimeout(Promise.all([store.runLog(), store.runners(), store.boards ? store.boards().catch(() => null) : null]), 10000); }
   catch (e) { body.innerHTML = '<p class="pick-help">기록을 불러오지 못했어요. 인터넷을 확인하고 «다시 보기»를 눌러 주세요.</p>'; return; }
   finally { logLoading = false; }
-  if (d.open) body.innerHTML = runLogHtml(log || {}, rs || {});
+  if (d.open) body.innerHTML = runLogHtml(log || {}, rs || {}, bd || {});
 }
-function runLogHtml(log, rs) {
-  const now = Date.now();
-  // PC 상태: 켜짐/꺼짐 · 지금 하는 일 수
-  const pcs = Object.entries(rs).filter(([, r]) => r && r.at).sort((a, b) => b[1].at - a[1].at).map(([pc, r]) => {
-    const live = now - r.at < LIVE;
-    const busy = typeof r.busy === 'number' ? r.busy : pcBusy(pc);
-    const st = !live ? `꺼져 있어요 · ${ago(now - r.at)}` : !r.ok ? `켜졌지만 ${r.why || '클로드를 못 열어요'}` : busy ? `켜짐 · ${busy}개 하는 중${r.max ? ` (한 번에 ${r.max}개까지)` : ''}` : '켜짐 · 쉬는 중';
-    return `<li class="lg-pc${live && r.ok ? '' : ' off'}"><span class="pc-name">💻 ${esc(pc)}</span><span class="pc-st">${esc(st)}</span></li>`;
+// 멈춤 감시 알림 쪽지(runner.js warnOnce: id «w»…, 칸 warn {k, pc}). 예약 작업 것은 판정 열쇠가 's'로 시작
+const isWarn = (x) => !!x && !!x.warn;
+const openWarns = () => Object.entries(ideas).map(([id, x]) => ({ ...x, id })).filter((x) => isWarn(x) && x.st !== 'done');
+const SES = { waiting: ['✋', '확인 기다림'], busy: ['⏳', '하는 중'], idle: ['💤', '쉬는 중'] };
+// 현황 창 위쪽: 살펴볼 것(문제) → PC(켜짐·열린 세션) → 예약 작업(개수·이번 주 많이 쓴 3). 2026-11-20, 출처: 효니 말 «응, 모아줘»
+function boardsHtml(rs, bd, now) {
+  const bpc = (bd && bd.pc) || {};
+  const sc = bd && bd.sched;
+  const warns = openWarns().sort((a, b) => (b.rat || b.at) - (a.rat || a.at));
+  const waitS = Object.entries(bpc).flatMap(([pc, p]) => (p.s || []).filter((s) => s.st === 'waiting').map((s) => ({ ...s, pc })));
+  const bad = (sc && sc.bad) || [];
+  // ① 살펴볼 것: 멈춤 알림 → 실패·놓친 예약 작업 → 확인 기다리는 세션
+  const probs = [
+    ...warns.map((x) => `<li class="lg-row prob"><button type="button" class="lg-btn" data-wid="${esc(x.id)}" aria-label="${esc(x.t || '')} 펼쳐 보기"><span class="lg-ico" aria-hidden="true">⚠️</span><span class="lg-main"><span class="lg-t">${esc(String(x.t || '').replace(/^⚠️\s*/, ''))}</span><span class="lg-st">멈춤 감시 알림 · ${ago(now - (x.rat || x.at))}</span></span><span class="lg-go" aria-hidden="true">›</span></button></li>`),
+    ...bad.map((b) => `<li class="lg-row prob"><span class="lg-ico" aria-hidden="true">${b.st === 'fail' ? '❌' : '⏭️'}</span><span class="lg-main"><span class="lg-t">${esc(b.t)}</span><span class="lg-st">예약 작업 ${b.st === 'fail' ? '실패' : '놓침'} · ${esc(b.pc)}${b.at ? ` · ${dayName(b.at)} ${hm(b.at)}` : ''}</span></span></li>`),
+    ...waitS.map((s) => `<li class="lg-row prob"><span class="lg-ico" aria-hidden="true">✋</span><span class="lg-main"><span class="lg-t">${esc(s.n)}</span><span class="lg-st">세션이 확인을 기다려요 · ${esc(s.pc)}${s.u ? ` · ${ago(now - s.u)}부터` : ''}</span></span></li>`),
+  ];
+  const probHtml = probs.length ? `<h3 class="lg-h warn">⚠️ 살펴볼 것 <b>${probs.length}</b></h3><ul class="lg-list">${probs.join('')}</ul>` : '';
+  // ② PC: 실행기 켜짐 신호 + 그 PC 열린 세션(확인 기다림·하는 중이 있는 PC 먼저)
+  const names = [...new Set([...Object.keys(rs).filter((k) => rs[k] && rs[k].at), ...Object.keys(bpc)])];
+  const rank = (pc) => { const s = (bpc[pc] && bpc[pc].s) || []; return s.some((x) => x.st === 'waiting') ? 0 : s.some((x) => x.st === 'busy') ? 1 : 2; };
+  const pcs = names.sort((a, b) => rank(a) - rank(b) || ((rs[b] && rs[b].at) || 0) - ((rs[a] && rs[a].at) || 0)).map((pc) => {
+    const r = rs[pc];
+    const live = !!r && now - r.at < LIVE;
+    const busy = r && typeof r.busy === 'number' ? r.busy : pcBusy(pc);
+    const st = !r ? '쪽지함 실행기 신호 없음' : !live ? `꺼져 있어요 · ${ago(now - r.at)}` : !r.ok ? `켜졌지만 ${r.why || '클로드를 못 열어요'}` : busy ? `켜짐 · 시킨 일 ${busy}개 하는 중${r.max ? ` (한 번에 ${r.max}개까지)` : ''}` : '켜짐 · 시킨 일 없음';
+    const p = bpc[pc];
+    const ss = (p && p.s) || [];
+    const cnt = ['waiting', 'busy', 'idle'].map((k) => [k, ss.filter((x) => x.st === k).length]).filter(([, n]) => n).map(([k, n]) => `${SES[k][1]} ${n}`).join(' · ');
+    const old = p && now - p.at > 15 * 60e3 ? ` · ${ago(now - p.at)} 기준` : '';
+    const ses = !p ? '' : ss.length
+      ? `<details class="pc-ses"><summary>열린 세션 ${ss.length}개 — ${esc(cnt)}${esc(old)}</summary><ul>${ss.map((s) => `<li class="ses ${esc(s.st)}"><span aria-hidden="true">${SES[s.st] ? SES[s.st][0] : '•'}</span> ${esc(s.n)} <span class="ses-st">${SES[s.st] ? SES[s.st][1] : ''}${s.u ? ` · ${ago(now - s.u)}` : ''}</span></li>`).join('')}</ul></details>`
+      : `<span class="pc-ses none">열린 세션 없음${esc(old)}</span>`;
+    return `<li class="lg-pc${live && r.ok ? '' : ' off'}"><span class="pc-name">💻 ${esc(pc)}</span><span class="pc-st">${esc(st)}</span>${ses}</li>`;
   }).join('');
+  // ③ 예약 작업: 정상·실패·놓침·멈춤 개수 + 이번 주 많이 쓴 3(API 요금 환산)
+  let schedHtml = '';
+  if (sc && sc.n) {
+    const stall = warns.filter((x) => String(x.warn.k || '').startsWith('s')).length;
+    const chip = (cls, label, n) => `<span class="sc-chip${n && cls ? ` ${cls}` : ''}">${label} <b>${n}</b></span>`;
+    const ages = Object.entries(sc.pcs || {}).sort((a, b) => b[1] - a[1]).map(([pc, t]) => `${pc} ${t ? ago(now - t) : '?'}`).join(' · ');
+    const top = (sc.top || []).map((x, i) => `<li><span class="top-n">${i + 1}</span><span class="lg-main"><span class="lg-t">${esc(x.t)}</span><span class="lg-st">${esc(x.pc)} · 약 $${Number(x.c || 0).toFixed(2)} · ${x.m || 0}분 · ${x.r || 0}번</span></span></li>`).join('');
+    schedHtml = `<h3 class="lg-h">예약 작업</h3>
+      <div class="sc-chips">${chip('', '정상', sc.n.ok || 0)}${chip('bad', '실패', sc.n.fail || 0)}${chip('bad', '놓침', sc.n.miss || 0)}${chip('bad', '멈춤', stall)}${chip('', '도는 중', sc.n.run || 0)}</div>
+      <p class="lg-note sc-note">예정 ${sc.n.plan || 0} · 끝난 1회 ${sc.n.end || 0}${ages ? ` · 모은 때: ${esc(ages)}` : ''}</p>
+      ${top ? `<h4 class="lg-sub">이번 주 많이 쓴 3 <span class="lg-note">지난 7일 · API 요금으로 쳤을 때</span></h4><ol class="lg-top">${top}</ol>` : ''}`;
+  }
+  return { probHtml, pcs, schedHtml };
+}
+function runLogHtml(log, rs, bd = {}) {
+  const now = Date.now();
+  const { probHtml, pcs, schedHtml } = boardsHtml(rs, bd, now);
   // 기다리는 일: PC를 골랐지만 아직 시작 전(기록엔 시작해야 줄이 생김)
   const waits = Object.entries(ideas).map(([id, x]) => ({ ...x, id })).filter(isWait).sort((a, b) => a.run.at - b.run.at)
     .map((x) => `<li class="lg-row wait"><span class="lg-time">${hm(x.run.at)}</span><span class="lg-main"><span class="lg-t">${esc(firstLine(x.t) || '(사진 쪽지)')}</span><span class="lg-st">🕒 ${esc(x.run.pc)}에서 시작을 기다려요 · ${dur(now - x.run.at)}째${pcBusy(x.run.pc) ? ` · 앞 일 ${pcBusy(x.run.pc)}개` : ''}</span></span></li>`).join('');
@@ -1132,12 +1215,17 @@ function runLogHtml(log, rs) {
       + `${re ? `<span class="lg-re">${esc(re)}</span>` : ''}${!x ? '<span class="lg-gone">지운 쪽지</span>' : ''}</span>`;
     return head + (open ? `<li class="lg-row"><button type="button" class="lg-btn" data-lid="${esc(v.id)}" aria-label="${esc(v.t || '')} 답하기 창 열기">${inner}<span class="lg-go" aria-hidden="true">›</span></button></li>` : `<li class="lg-row">${inner}</li>`);
   }).join('');
-  return `${pcs ? `<h3 class="lg-h">PC</h3><ul class="lg-pcs">${pcs}</ul>` : ''}`
-    + `${waits ? `<h3 class="lg-h">시작을 기다리는 일</h3><ul class="lg-list">${waits}</ul>` : ''}`
+  return probHtml
+    + `${pcs ? `<h3 class="lg-h">PC</h3><ul class="lg-pcs">${pcs}</ul>` : ''}`
+    + schedHtml
+    + `${waits ?`<h3 class="lg-h">시작을 기다리는 일</h3><ul class="lg-list">${waits}</ul>` : ''}`
     + `<h3 class="lg-h">기록 <span class="lg-note">최근 30일</span></h3>`
     + (items ? `<ul class="lg-list">${items}</ul>` : '<p class="pick-help">아직 기록이 없어요. 2026-11-20 이후 시킨 일부터 쌓여요.</p>');
 }
 function onRunLogClick(e) {
+  // 살펴볼 것의 멈춤 알림: 창을 닫고 판에서 그 쪽지를 펼쳐 보임(끝남으로·지우기는 거기서)
+  const w = e.target.closest('button[data-wid]');
+  if (w) { $('#runlog').close(); return showRow(w.dataset.wid); }
   const b = e.target.closest('button[data-lid]');
   if (!b) return;
   const x = ideas[b.dataset.lid];
@@ -1167,7 +1255,7 @@ function fillReport(list) {
   $('#rep-list').innerHTML = list.map((x) => `<li class="rep-item" data-rid="${esc(x.id)}">
     <span class="rep-t">${esc(firstLine(x.t) || '(사진 쪽지)')}</span>
     <p class="rep-re">${esc(lastClaude(x).x)}</p>
-    <div class="rep-acts"><button type="button" class="text-btn" data-rep="seen">봤어요(안 끝남)</button>${canReply(x) ? '<button type="button" class="text-btn" data-rep="reply">답하기</button>' : ''}<button type="button" class="text-btn" data-rep="done">끝남으로</button></div>
+    <div class="rep-acts"><button type="button" class="text-btn" data-rep="seen">봤어요(안 끝남)</button>${isWarn(x) ? '<button type="button" class="text-btn" data-rep="board">📋 현황 보기</button>' : canReply(x) ? '<button type="button" class="text-btn" data-rep="reply">답하기</button>' : ''}<button type="button" class="text-btn" data-rep="done">끝남으로</button></div>
   </li>`).join('');
 }
 async function onReportAct(e) {
@@ -1183,6 +1271,10 @@ async function onReportAct(e) {
       const plan = planCheck(x);
       await withTimeout(store.patch(id, plan.patch), 8000);
       showUndo('끝남으로 옮겼어요', id, plan.undo);
+    } else if (act === 'board') {
+      // 멈춤 알림: 보고 창을 닫고 현황 창으로. rep는 그대로(봤어요·끝남으로는 효니가 정함) — 닫기가 «나중에»처럼 이 화면에서만 덮어 둠
+      $('#rep').close();
+      openRunLog();
     } else if (act === 'reply') {
       // 보고(rep)는 답을 실제로 보낼 때 지운다(sendReply) — 답하기 창을 그냥 닫아도 🔔이 남게
       $('#rep').close();
