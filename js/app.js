@@ -1147,7 +1147,9 @@ function boardsHtml(rs, bd, now) {
   const bpc = (bd && bd.pc) || {};
   const sc = bd && bd.sched;
   const warns = openWarns().sort((a, b) => (b.rat || b.at) - (a.rat || a.at));
-  const waitS = Object.entries(bpc).flatMap(([pc, p]) => (p.s || []).filter((s) => s.st === 'waiting').map((s) => ({ ...s, pc })));
+  // 현황이 15분 안에 올라온 PC만 «지금» 상태로 본다(꺼진 PC의 마지막 «확인 기다림»이 살펴볼 것·PC 순서에 남지 않게, 검토자 지적)
+  const fresh = (pc) => !!bpc[pc] && now - (bpc[pc].at || 0) < 15 * 60e3;
+  const waitS = Object.entries(bpc).filter(([pc]) => fresh(pc)).flatMap(([pc, p]) => (p.s || []).filter((s) => s.st === 'waiting').map((s) => ({ ...s, pc })));
   const bad = (sc && sc.bad) || [];
   // ① 살펴볼 것: 멈춤 알림 → 실패·놓친 예약 작업 → 확인 기다리는 세션
   const probs = [
@@ -1155,10 +1157,11 @@ function boardsHtml(rs, bd, now) {
     ...bad.map((b) => `<li class="lg-row prob"><span class="lg-ico" aria-hidden="true">${b.st === 'fail' ? '❌' : '⏭️'}</span><span class="lg-main"><span class="lg-t">${esc(b.t)}</span><span class="lg-st">예약 작업 ${b.st === 'fail' ? '실패' : '놓침'} · ${esc(b.pc)}${b.at ? ` · ${dayName(b.at)} ${hm(b.at)}` : ''}</span></span></li>`),
     ...waitS.map((s) => `<li class="lg-row prob"><span class="lg-ico" aria-hidden="true">✋</span><span class="lg-main"><span class="lg-t">${esc(s.n)}</span><span class="lg-st">세션이 확인을 기다려요 · ${esc(s.pc)}${s.u ? ` · ${ago(now - s.u)}부터` : ''}</span></span></li>`),
   ];
+  if (sc && sc.more) probs.push(`<li class="lg-row prob"><span class="lg-ico" aria-hidden="true">➕</span><span class="lg-main"><span class="lg-st">실패·놓친 예약 작업 ${sc.more}개 더(아래 개수에 들어 있어요)</span></span></li>`);
   const probHtml = probs.length ? `<h3 class="lg-h warn">⚠️ 살펴볼 것 <b>${probs.length}</b></h3><ul class="lg-list">${probs.join('')}</ul>` : '';
   // ② PC: 실행기 켜짐 신호 + 그 PC 열린 세션(확인 기다림·하는 중이 있는 PC 먼저)
   const names = [...new Set([...Object.keys(rs).filter((k) => rs[k] && rs[k].at), ...Object.keys(bpc)])];
-  const rank = (pc) => { const s = (bpc[pc] && bpc[pc].s) || []; return s.some((x) => x.st === 'waiting') ? 0 : s.some((x) => x.st === 'busy') ? 1 : 2; };
+  const rank = (pc) => { const s = fresh(pc) ? bpc[pc].s || [] : []; return s.some((x) => x.st === 'waiting') ? 0 : s.some((x) => x.st === 'busy') ? 1 : 2; };
   const pcs = names.sort((a, b) => rank(a) - rank(b) || ((rs[b] && rs[b].at) || 0) - ((rs[a] && rs[a].at) || 0)).map((pc) => {
     const r = rs[pc];
     const live = !!r && now - r.at < LIVE;
@@ -1178,11 +1181,11 @@ function boardsHtml(rs, bd, now) {
   if (sc && sc.n) {
     const stall = warns.filter((x) => String(x.warn.k || '').startsWith('s')).length;
     const chip = (cls, label, n) => `<span class="sc-chip${n && cls ? ` ${cls}` : ''}">${label} <b>${n}</b></span>`;
-    const ages = Object.entries(sc.pcs || {}).sort((a, b) => b[1] - a[1]).map(([pc, t]) => `${pc} ${t ? ago(now - t) : '?'}`).join(' · ');
+    const ages = Object.entries(sc.pcs || {}).sort((a, b) => b[1] - a[1]).map(([pc, t]) => `<span class="nw">${esc(pc)} ${t ? ago(now - t) : '?'}</span>`).join(' · ');
     const top = (sc.top || []).map((x, i) => `<li><span class="top-n">${i + 1}</span><span class="lg-main"><span class="lg-t">${esc(x.t)}</span><span class="lg-st">${esc(x.pc)} · 약 $${Number(x.c || 0).toFixed(2)} · ${x.m || 0}분 · ${x.r || 0}번</span></span></li>`).join('');
     schedHtml = `<h3 class="lg-h">예약 작업</h3>
       <div class="sc-chips">${chip('', '정상', sc.n.ok || 0)}${chip('bad', '실패', sc.n.fail || 0)}${chip('bad', '놓침', sc.n.miss || 0)}${chip('bad', '멈춤', stall)}${chip('', '도는 중', sc.n.run || 0)}</div>
-      <p class="lg-note sc-note">예정 ${sc.n.plan || 0} · 끝난 1회 ${sc.n.end || 0}${ages ? ` · 모은 때: ${esc(ages)}` : ''}</p>
+      <p class="lg-note sc-note">예정 ${sc.n.plan || 0} · 끝난 1회 ${sc.n.end || 0}${sc.n.old ? ` · 도는 중이라 적혔지만 6시간 넘어 확인 안 됨 ${sc.n.old}` : ''}${ages ? ` · 모은 때: ${ages}` : ''}</p>
       ${top ? `<h4 class="lg-sub">이번 주 많이 쓴 3 <span class="lg-note">지난 7일 · API 요금으로 쳤을 때</span></h4><ol class="lg-top">${top}</ol>` : ''}`;
   }
   return { probHtml, pcs, schedHtml };

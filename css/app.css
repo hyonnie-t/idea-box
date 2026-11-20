@@ -252,7 +252,8 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
 .pc-ses ul { list-style: none; margin: var(--space-1) 0 0; padding: 0; display: grid; gap: var(--space-1); }
 .pc-ses .ses { overflow-wrap: anywhere; }
 .pc-ses .ses.waiting { color: var(--hot-t); font-weight: 700; }
-.ses-st { color: var(--soft); font-weight: 400; }
+.ses-st { color: var(--soft); font-weight: 400; white-space: nowrap; }
+.nw { white-space: nowrap; }
 .sc-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .sc-chip { padding: var(--space-1) var(--space-2); border-radius: 999px; background: var(--sky-soft); font-size: .85rem; }
 .sc-chip.bad { background: var(--hot-soft); color: var(--hot-t); font-weight: 700; }

@@ -113,12 +113,14 @@ const IDLE = 5 * 60e3; // 이만큼 안 만졌으면 «쉬는 PC»
 const YIELD = 90e3; // 쉬는 PC가 쓰는 PC에 양보하는 시간(쓰는 PC가 1분 뒤에야 볼 수도 있고, 표를 쓰기까지 20~30초 걸림)
 
 // 실행기 파일이 바뀌면(OneDrive로 새 판이 옴) 일이 없을 때 스스로 새 판으로 다시 켠다 — 한번 켜지면 며칠씩 도는 프로그램이라
-const SELF_M = (() => { try { return fs.statSync(__filename).mtimeMs; } catch (e) { return 0; } })();
+// 함께 보는 파일: boards.js(require 캐시라 바뀌어도 다시 켜야 새 판, 2026-11-20 검토자 지적)
+const WATCHED = [__filename, path.join(__dirname, 'boards.js')];
+const mtimeOf = () => Math.max(...WATCHED.map((f) => { try { return fs.statSync(f).mtimeMs; } catch (e) { return 0; } }));
+const SELF_M = mtimeOf();
 function restartIfChanged() {
-  let m = SELF_M;
-  try { m = fs.statSync(__filename).mtimeMs; } catch (e) { return; }
-  if (m === SELF_M || Date.now() - m < 60e3) return; // 막 바뀐 파일은 다 내려올 때까지 한 번 더 기다림
-  if (spawnSync(process.execPath, ['--check', __filename], { windowsHide: true }).status !== 0) return; // 덜 내려온 파일이면 그대로 돈다
+  const m = mtimeOf();
+  if (!m || m === SELF_M || Date.now() - m < 60e3) return; // 막 바뀐 파일은 다 내려올 때까지 한 번 더 기다림
+  if (WATCHED.some((f) => fs.existsSync(f) && spawnSync(process.execPath, ['--check', f], { windowsHide: true }).status !== 0)) return; // 덜 내려온 파일이면 그대로 돈다
   log('실행기 파일이 바뀌어 새 판으로 다시 켬');
   try { fs.rmSync(LOCK, { force: true }); } catch (e) {}
   spawn(process.execPath, [__filename], { detached: true, stdio: 'ignore', windowsHide: true }).unref();

@@ -196,7 +196,7 @@ function writeOne(id, x) {
 const summary = (s) => `물을 것: 열림 ${s.open + s.add} · 새로 올림 ${s.add} · 닫음 ${s.close}${s.reopen ? ` · 다시 엶 ${s.reopen}` : ''} · 답 적음 ${s.write}${s.missing ? ` · 못 적음 ${s.missing}` : ''}`
   + (s.blocked.length ? ` · 안 올림 ${s.blocked.length}(학생 이름·열쇠처럼 보임: ${[...new Set(s.blocked.map((b) => b.f))].join(', ')})` : '');
 
-module.exports = { sync, writeOne, collect, plan, blockedReason, summary, labelOf, idOf };
+module.exports = { sync, writeOne, collect, plan, blockedReason, summary, labelOf, idOf, SURNAME, NOT_NAME };
 
 if (require.main === module) {
   const dry = process.argv.includes('--dry');
