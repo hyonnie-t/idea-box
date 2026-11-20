@@ -30,6 +30,7 @@
     <button type="button" class="icon-btn" id="refresh" aria-label="새로고침">
       <lucian-refresh state="idle" size="22"></lucian-refresh>
     </button>
+    <button type="button" class="text-btn" id="runlog-open" hidden>📋 시킨 일</button>
     <button type="button" class="text-btn" id="signout" hidden>로그아웃</button>
   </div>
 </header>
@@ -96,6 +97,18 @@
     <ul class="pick-list" id="pick-list"></ul>
     <div class="sheet-foot">
       <button type="button" class="text-btn" id="pick-no">그만두기</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="sheet" id="runlog" aria-labelledby="runlog-title">
+  <form method="dialog">
+    <h2 id="runlog-title">📋 시킨 일 기록</h2>
+    <p class="pick-help">클로드에게 시킨 일이 언제, 어느 PC에서, 어떻게 끝났는지예요.</p>
+    <div class="lg-body" id="runlog-body"></div>
+    <div class="sheet-foot">
+      <button type="button" class="text-btn" id="runlog-again">다시 보기</button>
+      <button type="button" class="text-btn" id="runlog-close">닫기</button>
     </div>
   </form>
 </dialog>

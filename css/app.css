@@ -210,6 +210,30 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
 .rep-acts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .rep-acts button { min-height: 40px; }
 .tsub.rep { color: var(--sky-t); font-weight: 700; }
+/* «📋 시킨 일» 기록 창: PC 상태 → 기다리는 일 → 날짜별 기록(시각 칸 + 제목·결과) */
+.lg-body { max-height: 65vh; overflow: auto; margin-top: var(--space-3); }
+.lg-h { margin: var(--space-4) 0 var(--space-2); font-size: .95rem; color: var(--soft); }
+.lg-h:first-child { margin-top: 0; }
+.lg-note { font-weight: 400; font-size: .8rem; }
+.lg-pcs, .lg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.lg-pc { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-1) var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius); background: var(--sky-soft); }
+.lg-pc.off { background: transparent; border: 1px solid var(--line); color: var(--soft); }
+.lg-pc.off .pc-st { color: var(--soft); }
+.lg-day { margin-top: var(--space-3); font-weight: 700; font-size: .9rem; color: var(--sky-t); }
+.lg-day:first-child { margin-top: 0; }
+.lg-row > .lg-time, .lg-btn > .lg-time { flex: none; min-width: 48px; font-variant-numeric: tabular-nums; color: var(--soft); font-size: .9rem; }
+.lg-row { display: flex; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
+.lg-row.wait { background: var(--accent-soft); border-radius: 8px; padding: var(--space-2); border: 0; }
+.lg-btn { display: flex; gap: var(--space-2); width: 100%; min-height: 48px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 8px; transition: background .15s; }
+.lg-btn:hover { background: var(--sky-soft); }
+.lg-btn:active { transform: scale(.98); }
+.lg-main { flex: 1; min-width: 0; display: grid; gap: var(--space-1); }
+.lg-t { font-weight: 700; overflow-wrap: anywhere; }
+.lg-st { font-size: .85rem; color: var(--ink); }
+.lg-re { font-size: .85rem; color: var(--mint-t); background: var(--mint-soft); border-radius: 8px; padding: var(--space-1) var(--space-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-gone { font-size: .8rem; color: var(--soft); }
+.lg-go { flex: none; align-self: center; color: var(--soft); font-size: 1.2rem; padding: 0 var(--space-1); }
+@media (prefers-reduced-motion: reduce) { .lg-btn { transition: none; } .lg-btn:active { transform: none; } }
 html:has(dialog[open]) { overflow: hidden; }
 
 .toast {
