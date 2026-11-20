@@ -240,6 +240,28 @@ main { max-width: 720px; margin: 0 auto; padding: 0 var(--space-3) var(--space-7
 .lg-gone { font-size: .8rem; color: var(--soft); }
 .lg-go { flex: none; align-self: center; color: var(--soft); font-size: 1.2rem; padding: 0 var(--space-1); }
 @media (prefers-reduced-motion: reduce) { .lg-btn { transition: none; } .lg-btn:active { transform: none; } }
+/* 현황(2026-11-20): 살펴볼 것 · PC별 열린 세션 · 예약 작업 개수·이번 주 많이 쓴 3 */
+.lg-h.warn { color: var(--hot-t); }
+.lg-h b { font-variant-numeric: tabular-nums; }
+.lg-row.prob { background: var(--hot-soft); border: 0; border-radius: 8px; padding: var(--space-2); }
+.lg-row.prob .lg-btn:hover { background: transparent; }
+.lg-ico { flex: none; width: 24px; text-align: center; }
+.lg-pc .pc-ses { flex-basis: 100%; font-size: .85rem; color: var(--ink); }
+.lg-pc .pc-ses.none { color: var(--soft); }
+.pc-ses summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; }
+.pc-ses ul { list-style: none; margin: var(--space-1) 0 0; padding: 0; display: grid; gap: var(--space-1); }
+.pc-ses .ses { overflow-wrap: anywhere; }
+.pc-ses .ses.waiting { color: var(--hot-t); font-weight: 700; }
+.ses-st { color: var(--soft); font-weight: 400; white-space: nowrap; }
+.nw { white-space: nowrap; }
+.sc-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.sc-chip { padding: var(--space-1) var(--space-2); border-radius: 999px; background: var(--sky-soft); font-size: .85rem; }
+.sc-chip.bad { background: var(--hot-soft); color: var(--hot-t); font-weight: 700; }
+.sc-note { margin: var(--space-2) 0 0; color: var(--soft); overflow-wrap: anywhere; }
+.lg-sub { margin: var(--space-3) 0 var(--space-2); font-size: .9rem; }
+.lg-top { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.lg-top li { display: flex; gap: var(--space-2); align-items: flex-start; }
+.top-n { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-t); font-weight: 700; font-size: .8rem; }
 html:has(dialog[open]) { overflow: hidden; }
 
 .toast {

@@ -110,5 +110,7 @@ export function firebaseStore() {
     async runners() { const s = await load(); const v = await s.dbM.get(s.dbM.ref(s.db, `${ROOT}/ideaRunners`)); return v.val() || {}; },
     // 시킨 일 기록 { 키: { id, t, pc, at, re, end, how, code } } (tools/runner.js가 씀, 30일치). «📋 시킨 일» 창을 열 때 한 번 읽는다.
     async runLog() { const s = await load(); const v = await s.dbM.get(s.dbM.ref(s.db, `${ROOT}/ideaRunLog`)); return v.val() || {}; },
+    // 현황 { pc: { PC이름: { at, s: [{n, st, u}] } }, sched: { at, pcs, n, bad, top } } (tools/boards.js, 실행기가 5분마다). 같은 창에서 한 번 읽는다.
+    async boards() { const s = await load(); const v = await s.dbM.get(s.dbM.ref(s.db, `${ROOT}/ideaBoards`)); return v.val() || {}; },
   };
 }

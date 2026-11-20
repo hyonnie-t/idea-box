@@ -113,12 +113,14 @@ const IDLE = 5 * 60e3; // 이만큼 안 만졌으면 «쉬는 PC»
 const YIELD = 90e3; // 쉬는 PC가 쓰는 PC에 양보하는 시간(쓰는 PC가 1분 뒤에야 볼 수도 있고, 표를 쓰기까지 20~30초 걸림)
 
 // 실행기 파일이 바뀌면(OneDrive로 새 판이 옴) 일이 없을 때 스스로 새 판으로 다시 켠다 — 한번 켜지면 며칠씩 도는 프로그램이라
-const SELF_M = (() => { try { return fs.statSync(__filename).mtimeMs; } catch (e) { return 0; } })();
+// 함께 보는 파일: boards.js(require 캐시라 바뀌어도 다시 켜야 새 판, 2026-11-20 검토자 지적)
+const WATCHED = [__filename, path.join(__dirname, 'boards.js')];
+const mtimeOf = () => Math.max(...WATCHED.map((f) => { try { return fs.statSync(f).mtimeMs; } catch (e) { return 0; } }));
+const SELF_M = mtimeOf();
 function restartIfChanged() {
-  let m = SELF_M;
-  try { m = fs.statSync(__filename).mtimeMs; } catch (e) { return; }
-  if (m === SELF_M || Date.now() - m < 60e3) return; // 막 바뀐 파일은 다 내려올 때까지 한 번 더 기다림
-  if (spawnSync(process.execPath, ['--check', __filename], { windowsHide: true }).status !== 0) return; // 덜 내려온 파일이면 그대로 돈다
+  const m = mtimeOf();
+  if (!m || m === SELF_M || Date.now() - m < 60e3) return; // 막 바뀐 파일은 다 내려올 때까지 한 번 더 기다림
+  if (WATCHED.some((f) => fs.existsSync(f) && spawnSync(process.execPath, ['--check', f], { windowsHide: true }).status !== 0)) return; // 덜 내려온 파일이면 그대로 돈다
   log('실행기 파일이 바뀌어 새 판으로 다시 켬');
   try { fs.rmSync(LOCK, { force: true }); } catch (e) {}
   spawn(process.execPath, [__filename], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
@@ -341,6 +343,21 @@ function schedChecks(now) {
     body: `${kstTime(s.started)}에 시작한 실행이 ${kstTime(s.last)} 뒤로 멈춰 있어요(도구를 부르던 중에 끊겼거나 기다리는 중). 예약 작업 목록엔 «성공»으로 뜰 수도 있어요. 다시 돌리려면 앱 «예약 작업»에서 그 작업 «지금 실행»(세션 ${s.sid}).`,
   }));
 }
+// 현황 올리기(2026-11-20, 출처: 효니 말 «응, 모아줘»): 이 PC 열린 세션·예약 작업 상태를 앱 «📋 시킨 일» 창으로(tools/boards.js). 5분마다, 바뀐 것만 쓴다.
+const BOARD_EVERY = 5 * 60e3;
+function boardsTick() {
+  try {
+    const tmp = path.join(os.tmpdir(), 'ideabox-run-boards.json');
+    const fb = {
+      get: (p) => JSON.parse(fbcli(['database:get', q(p)]).trim() || 'null'),
+      // PC 이름(한글일 수 있음)은 명령줄이 아니라 파일 안 열쇠로
+      update: (p, obj) => { fs.writeFileSync(tmp, JSON.stringify(obj)); try { fbcli(['database:update', q(p), q(tmp), '--force']); } finally { fs.rmSync(tmp, { force: true }); } },
+    };
+    const r = require('./boards.js').sync({ root: ROOT, pc: PC, uid: UID, fb, dry: DRY });
+    if (DRY) log('(dry) 현황 올릴 것: ' + JSON.stringify(r).slice(0, 400));
+    else if (r.sched === 'wrote') log('현황: 예약 작업 상태 올림');
+  } catch (e) { log('현황 올리기 실패: ' + String(e.message || e).slice(0, 160)); }
+}
 let watchBusy = false;
 function watchTick(all) {
   if (watchBusy) return;
@@ -516,6 +533,7 @@ if (process.argv.includes('--watch-test')) {
   process.exit(ok ? 0 : 1);
 }
 if (process.argv.includes('--watch-only')) { watchTick(); process.exit(0); }
+if (process.argv.includes('--boards-only')) { boardsTick(); process.exit(0); } // 현황만 한 번 진짜로 올림(잠금·시키기 없음)
 
 (async () => {
   if (!DRY && !takeLock()) { if (ONCE) console.log('이 PC에서 실행기가 이미 돌고 있어요'); return; } // 이미 도는 중
@@ -525,10 +543,12 @@ if (process.argv.includes('--watch-only')) { watchTick(); process.exit(0); }
   log(`실행기 켜짐 (${ROOT})${canRun.ok ? '' : ` — ${canRun.why}, 쪽지를 가져가지 않아요`}`);
   if (!DRY) beat();
   asksTick();
+  boardsTick();
   await tick();
   if (ONCE || DRY) { watchTick(); if (!running.size) process.exit(0); return; }
   setInterval(tick, EVERY);
   setInterval(beat, EVERY);
   setInterval(asksTick, ASK_EVERY);
+  setInterval(boardsTick, BOARD_EVERY);
   setTimeout(() => { watchTick(); setInterval(watchTick, WATCH_EVERY); }, 2 * 60e3); // 켜지자마자 말고 2분 뒤부터(켜짐 신호가 먼저 돌게)
 })();
