@@ -85,8 +85,18 @@ function killOldRunners() {
 // 이 PC에서 claude를 열 수 있나(세션을 열 때와 같은 방식으로 불러 본다). 못 열면 쪽지를 가져가지 않고, 앱 PC 창에도 못 고르게 뜬다.
 // 2026-11-18 학교 PC가 쪽지를 가져간 뒤 `spawn claude ENOENT`로 바로 멈춘 일에서.
 let canRun = { ok: false, why: '아직 확인 전', at: 0 };
+// claude 네이티브 설치는 ~/.local/bin에 들어가는데, 그 폴더가 PATH에 없는 PC가 있다(2026-11-23 학교 PC: «claude 명령을 찾지 못해요»).
+// PATH의 claude가 안 열리면 그 자리의 claude.exe를 직접 쓴다. 세션을 열 때(spawn)도 같은 CLAUDE를 쓴다.
+const LOCAL_CLAUDE = path.join(os.homedir(), '.local', 'bin', process.platform === 'win32' ? 'claude.exe' : 'claude');
+let CLAUDE = 'claude';
 function checkClaude() {
-  const r = spawnSync('claude', ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+  const tryBin = (bin) => spawnSync(bin, ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 30000 });
+  let r = tryBin('claude');
+  CLAUDE = 'claude';
+  if ((r.error || r.status !== 0) && fs.existsSync(LOCAL_CLAUDE)) {
+    const r2 = tryBin(LOCAL_CLAUDE);
+    if (!r2.error && r2.status === 0) { r = r2; CLAUDE = LOCAL_CLAUDE; }
+  }
   canRun = r.error || r.status !== 0
     ? { ok: false, why: r.error && r.error.code === 'ENOENT' ? 'claude 명령을 찾지 못해요' : 'claude가 열리지 않아요', at: Date.now() }
     : { ok: true, why: '', at: Date.now() };
@@ -466,7 +476,7 @@ async function startOne(id, x) {
   const args = ['-p', prompt(id, resume, x), '--permission-mode', 'auto', '--output-format', 'json',
     '-n', `💌 ${firstLine(x.t).slice(0, 24) || '쪽지 ' + id}`, ...(resume ? ['--resume', sid] : ['--session-id', sid])];
   // IDEABOX_AUTO: 세션 안 inbox.js가 done을 답장으로 바꾸고 rep(보고)를 찍는다
-  const child = spawn('claude', args, { cwd: ROOT, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, IDEABOX_AUTO: '1' } });
+  const child = spawn(CLAUDE, args, { cwd: ROOT, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, IDEABOX_AUTO: '1' } });
   let out = '';
   let err = '';
   child.stdout.on('data', (d) => { out += d; });
