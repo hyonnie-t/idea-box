@@ -168,6 +168,19 @@ if (cmd === 'seen') {
   }
   patch(id, part);
   console.log(`${id} → ${part.st}${cmd === 'ask' ? ' ❓답 필요 (질문 달음)' : re ? ' (답장 달음)' : ''}`);
+  // 시간표 할 일 잇기(2026-11-23, 출처: 효니 말 «쪽지함이랑 예약 작업으로 한 일 중에 완료 체크 안 된 할일 완료», «앞으로도 연계되면 좋겠는데»):
+  // 끝낸 일과 겹치는 열린 할 일을 보여 주기만 한다. 완료는 세션이 같은 일인지 보고 시간표할일.js done으로(여기서 자동으로 닫지 않음)
+  if (cmd !== 'ask' && !process.argv.includes('--no-tasks')) {
+    const tool = path.resolve(__dirname, '..', '..', '..', '클로드작업', '도구', '시간표할일.js');
+    if (fs.existsSync(tool)) {
+      const r = spawnSync(process.execPath, [tool, 'find', `${data[id].t || ''} ${re}`], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+      const out = (r.stdout || '').trim();
+      if (r.status === 0 && out.startsWith('완료 후보')) {
+        console.log(`\n[시간표 할 일 ${out}`.replace('완료 후보(', '완료 후보] ('));
+        console.log(`  → 이번에 다 끝낸 일과 같은 것만: node "${tool}" done <id> --why "쪽지 ${id}"`);
+      }
+    }
+  }
 } else {
   const data = readAll();
   // «효니에게 물을 것»(src 칸, tools/asks.js가 올림)은 효니 쪽지가 아니라 따로 센다 — 받아 두기·숫자에 섞이지 않게(2026-11-18)
