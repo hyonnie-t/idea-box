@@ -203,9 +203,57 @@ const firstLine = (s) => (String(s || '').split('\n').find((l) => l.trim()) || '
 
 // 자동 세션이 하지 않을 일(2026-11-18, 물을 것 붙이기 때 넓힘): 미리보기·초안까지만 하고 ask로 다시 묻는다
 const NO_GO = '지우기(파일·글·쪽지·레포·브랜치)·배포(push·PR 병합·Pages·Apps Script 배포)·학생 기록 등록·학부모·학생 문자·메일 발송·나이스 상신·힉스필드 사용(크레딧)·강제 푸시·결제·공개 게시';
+// 효니가 답해서 배포를 허락했나(2026-11-23, 출처: 효니 말 «응, 답하면 배포까지»):
+// 그날 수능 던전 쪽지는 «가: 배포해» 답 뒤 배포까지 했고, culture-dig 쪽지는 같은 답에도 자동 모드 검사기가 push를 막아 갈렸다.
+// 이제 효니의 «가장 최근» 답(대화 th의 효니 말, 물을 것이면 a)에 배포 말이 있고 미루는 말이 없을 때만 배포를 허락하고,
+// 허락이 없으면 push·병합 명령 자체를 막는다(검사기 판단에 맡기지 않음).
+// 미루는·거절 말(검토 반영: «안 돼·안 할래·하지 말아줘·금지·X·내일·대기·전에» 등도 거절로). 애매하면 허락하지 않는 쪽으로 잡는다.
+const DEPLOY_NO = /안\s*(해|돼|되|할|하)|않|하지\s*마|말아|말고|금지|\bX\b|✕|❌|보류|나중|내일|대기|전에|아직|아니|조금\s*더|더\s*(볼|보|확인)|기다|멈춰|취소|고마|감사|잘\s*(됐|되)|됐네/i;
+function lastHyoniAnswer(x = {}) {
+  if (x.src) return x.a ? String(x.a) : '';
+  const th = (x.th && typeof x.th === 'object' ? Object.values(x.th) : []).filter((m) => m && typeof m.x === 'string')
+    .sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0));
+  // 효니 답이 «클로드 질문(q) 바로 뒤»일 때만 답으로 본다 — 배포를 마친 답장 뒤 «배포 잘 됐네» 같은 말이 다시 허락이 되지 않게(검토 반영)
+  // 그 답이 대화의 맨 마지막이어야 한다 — 답 뒤에 클로드가 이미 말했으면(배포했어요·새 질문) 그 답은 이미 쓴 것(재검토 반영)
+  const lastH = th.length - 1;
+  if (lastH < 0 || th[lastH].w !== 'h') return '';
+  const before = th.slice(0, lastH).filter((m) => m.w !== 'h');
+  const prevC = before[before.length - 1];
+  return prevC && prevC.q ? th[lastH].x : '';
+}
+// 허락 줄은 정해진 모양만(재검토 반영 — 거절 말을 하나씩 막는 방식은 «못해·불가·담에·싫어·hold…»가 계속 빠져나갔다):
+// [번호 ①·1.] [보기 가:] 배포|올려|병합|머지|푸시|push [해·해 줘·하자·해도 돼·줘·ㄱㄱ·고] [.!~] 뿐인 줄. 그 밖의 말이 붙으면 허락이 아니다.
+const DEPLOY_LINE = /^\s*(?:[①-⑳]|\(?\d+[.)])?\s*(?:[가-하]\s*[:.)]\s*)?(?:배포|올려|병합|머지|푸시|push)\s*(?:해\s*(?:줘|주세요|도\s*(?:돼|좋아))?|하자|해요|줘|ㄱ+|고)?\s*[.!~]*\s*$/i;
+const NUMBERED = /^\s*(?:[①-⑳]|\(?\d+[.)])/;
+function deployOk(x) {
+  const a = lastHyoniAnswer(x);
+  const lines = a.split(/\n/).filter((l) => l.trim());
+  // 번호 없는 줄에 미루는 말이 있으면 답 전체를 허락으로 보지 않는다(«배포해\n아직 확인할 게 있어»). 번호 줄은 다른 질문의 답이라 따로 본다.
+  if (lines.some((l) => !NUMBERED.test(l) && DEPLOY_NO.test(l))) return '';
+  return lines.some((l) => DEPLOY_LINE.test(l)) ? a : '';
+}
+// claude -p 권한 규칙: 허락이면 작업 브랜치 push·PR·병합을 미리 허락(검사기가 막지 않게), 아니면 막는다. 강제·main 직접 push는 늘 막는다.
+const PUSH_CMDS = ['git push', 'gh pr create', 'gh pr merge'];
+const rule = (tool, c) => `${tool}(${c}:*)`;
+// 늘 막는 것(검토 반영 — 앞부분만 맞추던 규칙은 «git push -u origin main»·«… --force»·«git -C x push»로 빠져나갔다).
+// 규칙 가운데 *가 먹는 것은 2026-11-23 claude -p로 직접 시험함(-u origin main·뒤에 붙은 --force·git -C … push 모두 거부, 보통 push는 실행).
+// «main»이 든 브랜치 이름(예: feat/maintain)도 막히는데, 그때 세션은 ask로 묻는다 — 안전한 쪽.
+const NEVER_PAT = ['git push *main*', 'git push *--force*', 'git push -f*', 'git push * -f*', 'git push *+*', 'git push *--delete*', 'git push * -d *', 'git push *--mirror*', 'git -C *push*', 'git -c *push*'];
+const both = (pats) => pats.flatMap((p) => [`Bash(${p})`, `PowerShell(${p})`]);
+const NEVER = both(NEVER_PAT);
+function permArgs(ok) {
+  const cmds = PUSH_CMDS.flatMap((c) => [rule('Bash', c), rule('PowerShell', c)]);
+  // 허락이 없을 때는 우회 표기(git -C … push, gh api …merge)까지 막는다
+  return ok ? ['--allowedTools', ...cmds, '--disallowedTools', ...NEVER] : ['--disallowedTools', ...cmds, ...NEVER, ...both(['gh api *merge*'])];
+}
 function prompt(id, resumed, x = {}) {
   const inbox = 'node 웹앱/idea-box/tools/inbox.js';
-  const stop = `되돌리기 어려운 일 — ${NO_GO} — 과 효니만 정할 수 있는 일은 하지 않는다. 미리보기·초안까지 만든 뒤 \`${inbox} ask ${id} "질문"\` 으로 묻고 끝낸다. 질문은 쉬운 말로, 물을 것이 여럿이면 «① …» «② …» 줄마다 하나씩, 고를 것은 줄 끝에 «[가 / 나 / 다]» — 앱이 질문마다 답 칸과 번호 단추를 보인다.`;
+  const okAns = deployOk(x);
+  const deploy = okAns
+    ? `배포 허락: 효니가 답에서 배포를 허락했다(«${firstLine(okAns).slice(0, 80)}»). 이 쪽지의 레포만, 레포 CLAUDE.md 순서대로 작업 브랜치 push → PR → 병합 → 배포 주소에서 새 판이 뜨는지 확인까지 한다(이 세션은 push·PR·병합 명령이 미리 허락돼 있다). main 직접 push·강제 푸시·지우기·Apps Script 새 버전 배포는 여전히 하지 않는다 — Apps Script는 효니에게 «새 버전» 배포를 부탁하는 줄을 답장에 쓴다. 답장에 배포 주소와 확인한 것을 적는다.`
+    : `배포 묻기: 효니 답에 배포 허락이 없다. 이 세션은 push·PR·병합 명령이 막혀 있다. 커밋까지 하고, 배포가 필요하면 \`${inbox} ask ${id} "… 배포할까요? [가: 배포해 / 나: 조금 더 볼게]"\` 로 묻는다 — 효니가 «배포해»로 답하면 다음 세션이 배포까지 한다.`;
+  const noGo = okAns ? NO_GO.replace('배포(push·PR 병합·Pages·Apps Script 배포)', 'Apps Script 배포') : NO_GO;
+  const stop = `되돌리기 어려운 일 — ${noGo} — 과 효니만 정할 수 있는 일은 하지 않는다. 미리보기·초안까지 만든 뒤 \`${inbox} ask ${id} "질문"\` 으로 묻고 끝낸다. 질문은 쉬운 말로, 물을 것이 여럿이면 «① …» «② …» 줄마다 하나씩, 고를 것은 줄 끝에 «[가 / 나 / 다]» — 앱이 질문마다 답 칸과 번호 단추를 보인다. ${deploy}`;
   const tail = [
     `다 하면 \`${inbox} reply ${id} "결과(쉬운 말, 만든 파일·주소 포함)"\` — «끝남»은 효니가 답장을 보고 앱에서 정하니 done은 쓰지 않는다. 묻는 답이면 답 자체를 답장에 적는다(«파일 보세요»로 끝내지 않기). 다 못 했으면 \`${inbox} reply ${id} "한 것 · 남은 것"\`. 답장은 효니가 폰에서 읽는다. reply가 «시간표 할 일 완료 후보»를 보여 주면, 이번에 다 끝낸 일과 같은 할 일만 (쪽지 done과 다른 명령인) \`node 클로드작업/도구/시간표할일.js done <할 일 id> --why "쪽지 ${id}"\` 로 완료하고 답장 끝에 «시간표 할 일 완료: 제목» 한 줄을 더 단다(남은 일이 있는 할 일·애매한 것은 그대로 둔다. 2026-11-23, 출처: 효니 말 «앞으로도 연계되면 좋겠는데»).`,
     '이 세션은 쪽지함이 연 자동 세션이다: 첫 응답 머릿말·사이드바 정리·결과 보고 페이지는 하지 않고, 결과는 쪽지 답장으로만 남긴다.',
@@ -473,7 +521,9 @@ async function startOne(id, x) {
   log(`${id} 시작 «${firstLine(x.t).slice(0, 40)}» 세션 ${sid}${resume ? ' (이어서)' : ''}`);
   const logHead = { id, t: logT(x), pc: PC, at: Date.now(), ...(resume ? { re: true } : {}) };
   runLog(n, logHead);
-  const args = ['-p', prompt(id, resume, x), '--permission-mode', 'auto', '--output-format', 'json',
+  const okDeploy = !!deployOk(x);
+  if (okDeploy) log(`${id} 효니 답에 배포 허락 — push·PR·병합 허락으로 연다`);
+  const args = ['-p', prompt(id, resume, x), '--permission-mode', 'auto', '--output-format', 'json', ...permArgs(okDeploy),
     '-n', `💌 ${firstLine(x.t).slice(0, 24) || '쪽지 ' + id}`, ...(resume ? ['--resume', sid] : ['--session-id', sid])];
   // IDEABOX_AUTO: 세션 안 inbox.js가 done을 답장으로 바꾸고 rep(보고)를 찍는다
   const child = spawn(CLAUDE, args, { cwd: ROOT, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, IDEABOX_AUTO: '1' } });
@@ -519,6 +569,35 @@ async function startOne(id, x) {
 // 멈춤 감시 시험(2026-11-20):
 //   --watch-test  가짜 쪽지·켜짐 신호로 판정만 출력(아무 데도 안 씀). 맞으면 종료 코드 0
 //   --watch-only  잠금·시키기 없이 멈춤 감시만 한 번 진짜로(알림 쪽지를 씀). --watch-fake N 과 같이 쓰면 가짜 예약 멈춤 하나를 더함
+// --deploy-test: 효니 답 → 배포 허락 판정과 권한 인자만 확인(아무 데도 안 씀). 맞으면 종료 코드 0
+if (process.argv.includes('--deploy-test')) {
+  // [w, 글, 질문?] — c 줄은 셋째가 true면 질문(q)
+  const th = (...xs) => ({ th: Object.fromEntries(xs.map(([w, x, q], i) => ['m' + i, { w, x, at: i + 1, ...(q ? { q: true } : {}) }])) });
+  const Q = ['c', '배포할까요?', true];
+  const no = ['배포는 못해', '배포 불가', '배포 안함', '배포 NO', '배포 ㄴㄴ', '배포 hold', '배포는 담에', '배포 이따가', '배포 미뤄', '배포 잠깐', '배포 싫어', '배포 중단', '배포는 별로', '배포는 이르다', '배포해도 될까?', '배포해도 되는지 확인부터', '배포는 내가 직접 할게', '배포해\n아직 확인할 게 있어', '배포하면 안 돼', '배포는 안 할래', '배포 금지', '배포 X', '배포 전에 더 확인해줘', '배포는 내일', '배포 대기', 'push는 하지 말아줘', '배포하지 말아줘', '배포는 하지 않아도 돼', '① 나: 조금 더 볼게', '배포는 하지 마', '배포는 아직'];
+  const cases = [
+    ['수능 던전 답', th(['c', '① 배포할까요?', true], ['h', '① 가: 배포해\n② 나: 반반 섞기']), true],
+    ['culture-dig 답', th(['c', '배포는 일반 창에서?', true], ['h', '그렇게 할게']), false],
+    ...no.map((s) => [`거절 «${s}»`, th(Q, ['h', s]), false]),
+    ['옛 답엔 허락, 최근 답엔 없음', th(Q, ['h', '배포해'], ['c', '또 물음', true], ['h', '나: 더 볼게']), false],
+    ['배포 끝낸 답장 뒤 고마움', th(Q, ['h', '배포해'], ['c', '배포했어요'], ['h', '배포 잘 됐네 고마워']), false],
+    ['배포 끝낸 답장 뒤 다른 말', th(Q, ['h', '배포해'], ['c', '배포했어요'], ['h', '이번엔 색 바꿔서 올려']), false],
+    ['질문 없이 효니 말', th(['h', '배포해']), false],
+    ['허락 «올려»', th(Q, ['h', '가: 올려']), true],
+    ...['배포해', '가: 배포해 줘', '올려 줘', '배포해도 돼', '1. 배포 ㄱㄱ', '머지해!'].map((s) => [`허락 «${s}»`, th(Q, ['h', s]), true]),
+    ['답 뒤에 새 질문', th(Q, ['h', '배포해'], ['c', '다른 것도 할까요?', true]), false],
+    ['답 뒤에 배포했어요', th(Q, ['h', '배포해'], ['c', '배포했어요']), false],
+    ['물을 것 답', { src: { f: 'a.md' }, a: '가: 올려' }, true],
+    ['답 없음', { t: '배포해 줘' }, false], // 처음 쪽지 글은 답이 아니다 — 고친 것을 보기 전 허락이 아님
+  ];
+  let bad = 0;
+  for (const [name, x, want] of cases) { const got = !!deployOk(x); if (got !== want) bad++; console.log(`${got === want ? 'ok ' : 'XX '} ${name}: ${got}`); }
+  const a = permArgs(true), b = permArgs(false);
+  const chk = [a.includes('Bash(git push:*)') && a.indexOf('--allowedTools') < a.indexOf('Bash(git push:*)'), b.indexOf('--disallowedTools') === 0 && b.includes('Bash(gh pr merge:*)') && b.includes('Bash(gh api *merge*)'), ['Bash(git push *--force*)', 'PowerShell(git push *main*)', 'Bash(git -C *push*)'].every((r) => a.includes(r) && b.includes(r))];
+  chk.forEach((c, i) => { if (!c) bad++; console.log(`${c ? 'ok ' : 'XX '} 권한 인자 ${i + 1}`); });
+  console.log(prompt('x', true, cases[0][1]).includes('배포 허락') && prompt('x', true, cases[1][1]).includes('배포 묻기') ? 'ok  지시문' : (bad++, 'XX  지시문'));
+  process.exit(bad ? 1 : 0);
+}
 if (process.argv.includes('--watch-test')) {
   const now = Date.now(), M = 60e3;
   const all = {
