@@ -155,12 +155,47 @@ function patch(id, part) {
 }
 // 켜짐 신호. PC 이름(한글일 수 있음)을 명령줄에 넣지 않으려고 윗칸에 { PC: … }로 쓴다.
 // 일하는 중에도 찍히게 tick과 따로 돈다(안 그러면 바쁜 PC가 앱에 «꺼져 있어요»로 뜬다).
+// 2026-11-24: firebase 명령 한 번이 40~50초 걸리는 PC에선 tick·현황 올리기의 spawnSync가 줄을 막아 신호가 3~4분씩 밀렸다
+// (앱 LIVE 150초 → 켜진 PC가 «꺼져 있어요», 출처: 효니 말 «자꾸 꺼져있다고 뜬다»). 그래서 신호는 따로 스레드(Worker)에서 1분마다 보낸다.
+// 본 줄은 beat()로 지금 상태(ok·why·busy)만 넘긴다. --once·--dry는 예전처럼 본 줄에서 바로 쓴다.
+// busy = 지금 이 PC에서 도는 시킨 일 수, max = 상한(앱이 «앞 일 N개»를 보일 때 씀. 옛 실행기는 이 두 칸이 없다)
+const beatState = () => ({ ok: canRun.ok, why: canRun.why || null, busy: running.size, max: MAX });
+let beatW = null;
+const BEAT_WORKER = `
+const { parentPort, workerData: w } = require('worker_threads');
+const { spawnSync } = require('child_process');
+const fs = require('fs'), path = require('path'), os = require('os');
+let st = w.st;
+parentPort.on('message', (m) => { st = m; });
+const tmp = path.join(os.tmpdir(), 'ideabox-run-beat.json');
+const qq = (s) => (process.platform === 'win32' ? '"' + s + '"' : s);
+function once() {
+  const t0 = Date.now();
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ [w.pc]: Object.assign({ at: t0 }, st) }));
+    const r = spawnSync(w.npx, ['--yes', 'firebase-tools', 'database:update', w.ref, qq(tmp), '--force', '--project', w.project], {
+      encoding: 'utf8', shell: process.platform === 'win32', windowsHide: true, timeout: 90000, env: Object.assign({}, process.env, { MSYS_NO_PATHCONV: '1' }),
+    });
+    if (r.status !== 0) parentPort.postMessage('켜짐 신호 실패: ' + String(r.stderr || r.stdout || r.error || '').trim().split('\\n').slice(-2).join(' ').slice(0, 160));
+  } catch (e) { parentPort.postMessage('켜짐 신호 실패: ' + String(e.message || e).slice(0, 160)); }
+  finally { try { fs.rmSync(tmp, { force: true }); } catch (e) {} }
+  setTimeout(once, Math.max(5e3, w.every - (Date.now() - t0)));
+}
+once();
+`;
+function startBeatWorker() {
+  const { Worker } = require('worker_threads');
+  beatW = new Worker(BEAT_WORKER, { eval: true, workerData: { pc: PC, ref: `/users/${UID}/ideaRunners`, npx: NPX, project: PROJECT, every: EVERY, st: beatState() } });
+  beatW.on('message', (m) => log(String(m)));
+  beatW.on('error', (e) => { log('켜짐 신호 스레드 오류, 본 줄로 돌아감: ' + String(e.message || e).slice(0, 160)); beatW = null; });
+  beatW.on('exit', () => { beatW = null; });
+}
 function beat() {
   if (Date.now() - canRun.at > 10 * 60e3) { const was = canRun.ok; checkClaude(); if (was !== canRun.ok) log(canRun.ok ? 'claude 열 수 있음' : `claude 못 엶: ${canRun.why}`); }
+  if (beatW) { beatW.postMessage(beatState()); return; }
   const tmp = path.join(os.tmpdir(), 'ideabox-run-beat.json');
   try {
-    // busy = 지금 이 PC에서 도는 시킨 일 수, max = 상한(앱이 «앞 일 N개»를 보일 때 씀. 옛 실행기는 이 두 칸이 없다)
-    fs.writeFileSync(tmp, JSON.stringify({ [PC]: { at: Date.now(), ok: canRun.ok, why: canRun.why || null, busy: running.size, max: MAX } }));
+    fs.writeFileSync(tmp, JSON.stringify({ [PC]: { at: Date.now(), ...beatState() } }));
     fbcli(['database:update', `/users/${UID}/ideaRunners`, q(tmp), '--force']);
   } catch (e) { log('켜짐 신호 실패: ' + e.message.slice(0, 160)); } finally { fs.rmSync(tmp, { force: true }); }
 }
@@ -515,6 +550,7 @@ async function startOne(id, x) {
     if (!back || back.run?.n !== n) { log(`${id} 다른 PC가 가져감`); return; }
     if (!back.go) { log(`${id} 그새 효니가 체크를 풂`); patch(id, { run: null }); return; }
     took = true;
+    if (beatW) beatW.postMessage(beatState()); // busy 바로 반영
   } catch (e) { log(`${id} 가져가기 실패: ${e.message.slice(0, 160)}`); return; } finally { if (!took) running.delete(n); } // 표를 빼야 쓰다 만 내 run을 다음 tick이 내려놓는다
   // 물을 것이면 효니 답을 출처 파일에 먼저 적어 둔다(10분 맞추기를 기다리지 않게)
   if (x.src && x.a) { try { log(`${id} 답 적기: ${require('./asks.js').writeOne(id, x)}`); } catch (e) { log(`${id} 답 적기 실패: ${String(e.message || e).slice(0, 160)}`); } }
@@ -561,6 +597,7 @@ async function startOne(id, x) {
     runLog(n, { ...logHead, end: Date.now(), how, code: code ?? null }); // 시작 줄 쓰기가 실패했어도 끝 줄만으로 한 줄이 되게
     // 마무리를 쓴 뒤에 표를 뺀다(firebase 쓰기는 동기라 그 사이 tick이 끼지 않지만, 순서로도 «내 일»이 남의 멈춘 일로 보이지 않게)
     running.delete(n);
+    if (beatW) beatW.postMessage(beatState());
     if (ONCE) { if (!running.size) process.exit(0); return; }
     setTimeout(tick, 2000); // 줄 선 다음 일
   });
@@ -630,7 +667,8 @@ if (process.argv.includes('--boards-only')) { boardsTick(); process.exit(0); } /
   if (!DRY && !ONCE) killOldRunners();
   checkClaude();
   log(`실행기 켜짐 (${ROOT})${canRun.ok ? '' : ` — ${canRun.why}, 쪽지를 가져가지 않아요`}`);
-  if (!DRY) beat();
+  if (!DRY && !ONCE) startBeatWorker(); // 신호 스레드가 바로 첫 신호를 보냄
+  else if (!DRY) beat();
   asksTick();
   boardsTick();
   await tick();
