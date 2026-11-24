@@ -352,7 +352,7 @@ html:has(dialog[open]) { overflow: hidden; }
 #fold-all { flex: none; min-height: 32px; font-size: .85rem; }
 .board-sum b { color: var(--ink); }
 .groups { display: grid; gap: var(--space-3); }
-.group { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.group { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; overflow: clip; }
 .group h3 { margin: 0; font-size: 1rem; }
 .ghead { width: 100%; min-height: 48px; display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); border: 0; background: transparent; cursor: pointer; text-align: left; }
 .gname { font-weight: 700; }
@@ -384,6 +384,9 @@ html:has(dialog[open]) { overflow: hidden; }
 .tmore { grid-column: 2 / -1; padding-bottom: var(--space-3); animation: rise .25s var(--bounce); }
 .tmore .text { margin-top: 0; }
 .tmore .row { margin-top: var(--space-2); }
+/* 대화가 길어도 단추 줄(답하기·끝남으로·지우기)이 화면 아래에 붙어 따라온다(2026-11-24, 출처: 효니 말 «대화가 길어지면 마지막에 입력 단추가 있어서 불편해»).
+   .group의 overflow를 clip으로 둬야 sticky가 먹는다(hidden이면 안 먹음) */
+.tmore > .row:last-child { position: sticky; bottom: 0; z-index: 1; background: var(--paper); border-top: 1px solid var(--line); padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom, 0px)); }
 .tmeta { font-size: .8rem; color: var(--soft); }
 .done-toggle { margin: var(--space-1) var(--space-3) 0; min-height: 40px; padding: 0 var(--space-3); border: 1px dashed var(--line); border-radius: 999px; background: transparent; color: var(--soft); cursor: pointer; font-size: .85rem; }
 .rows-done { margin-top: var(--space-1); }
