@@ -386,7 +386,11 @@ html:has(dialog[open]) { overflow: hidden; }
 .tmore .row { margin-top: var(--space-2); }
 /* 대화가 길어도 단추 줄(답하기·끝남으로·지우기)이 화면 아래에 붙어 따라온다(2026-11-24, 출처: 효니 말 «대화가 길어지면 마지막에 입력 단추가 있어서 불편해»).
    .group의 overflow를 clip으로 둬야 sticky가 먹는다(hidden이면 안 먹음) */
-.tmore > .row:last-child { position: sticky; bottom: 0; z-index: 1; background: var(--paper); border-top: 1px solid var(--line); padding: var(--space-2) 0 calc(var(--space-2) + env(safe-area-inset-bottom, 0px)); }
+/* 2026-11-25 고침(쪽지 imwuhxxqhhty4 «왼쪽 줄 봐»): 아이폰 아래 여백을 padding으로 넣으면 제자리에 있을 때 빈 칸이 생겨서 bottom으로 옮김.
+   왼쪽 체크 칸(48px)과 오른쪽 여백까지 띠를 넓혀 끊긴 모서리가 안 보이게 함 */
+.tmore > .row:last-child { position: sticky; bottom: env(safe-area-inset-bottom, 0px); z-index: 1; background: var(--paper); border-top: 1px solid var(--line); margin-left: -48px; margin-right: calc(-1 * var(--space-3)); padding: var(--space-2) var(--space-3) var(--space-2) 48px; } /* 48px = .trow 첫 칸 폭 */
+/* 펼친 쪽지는 길어서 «급함·시키는 중» 옆 색이 왼쪽에 긴 줄로 남았다 → 제목 높이까지만 보이고 아래로 사라지게 */
+.trow.open.is-hot { background: linear-gradient(to bottom, transparent 48px, var(--paper) 96px), linear-gradient(90deg, var(--hot-soft), transparent 40%); }
 .tmeta { font-size: .8rem; color: var(--soft); }
 .done-toggle { margin: var(--space-1) var(--space-3) 0; min-height: 40px; padding: 0 var(--space-3); border: 1px dashed var(--line); border-radius: 999px; background: transparent; color: var(--soft); cursor: pointer; font-size: .85rem; }
 .rows-done { margin-top: var(--space-1); }
@@ -420,6 +424,7 @@ html:has(dialog[open]) { overflow: hidden; }
 .tcheck.go input { accent-color: var(--sky); }
 .tsub.go { color: var(--sky-t); font-weight: 700; }
 .trow.is-go { background: linear-gradient(90deg, var(--sky-soft), transparent 40%); }
+.trow.open.is-go { background: linear-gradient(to bottom, transparent 48px, var(--paper) 96px), linear-gradient(90deg, var(--sky-soft), transparent 40%); } /* 펼친 쪽지 왼쪽 긴 줄 막기(2026-11-25) */
 .sum-help { font-size: .85rem; }
 
 /* 효니에게 물을 것(2026-11-18): 판 맨 위, 답 필요와 같은 귤색 */
