@@ -296,20 +296,24 @@ const rule = (tool, c) => `${tool}(${c}:*)`;
 const NEVER_PAT = ['git push *main*', 'git push *--force*', 'git push -f*', 'git push * -f*', 'git push *+*', 'git push *--delete*', 'git push * -d *', 'git push *--mirror*', 'git -C *push*', 'git -c *push*'];
 const both = (pats) => pats.flatMap((p) => [`Bash(${p})`, `PowerShell(${p})`]);
 const NEVER = both(NEVER_PAT);
+const GAS_DEPLOY_PAT = ['*relay-deploy.py push *', '*relay-deploy.py deploy *', '*relay-deploy.py check*', '*relay-deploy.py rollback *'];
 function permArgs(ok) {
   const cmds = PUSH_CMDS.flatMap((c) => [rule('Bash', c), rule('PowerShell', c)]);
   // 허락이 없을 때는 우회 표기(git -C … push, gh api …merge)까지 막는다
-  return ok ? ['--allowedTools', ...cmds, '--disallowedTools', ...NEVER] : ['--disallowedTools', ...cmds, ...NEVER, ...both(['gh api *merge*'])];
+  // Apps Script 새 버전 배포는 레포에 배포 도구(새 버전+점검+실패 시 되돌림)가 있는 것만 허락(2026-11-26, 효니 결정 2026-11-10 «중계 배포는 Claude가 relay-deploy.py로»,
+  // 출처: 효니 말 «얘 자꾸 왜이러니» — 쪽지함 세션이 «배포해» 답에도 책장 중계를 효니에게 떠넘김)
+  const gas = both(GAS_DEPLOY_PAT);
+  return ok ? ['--allowedTools', ...cmds, ...gas, '--disallowedTools', ...NEVER] : ['--disallowedTools', ...cmds, ...NEVER, ...both(['gh api *merge*'])];
 }
 function prompt(id, resumed, x = {}) {
   const inbox = 'node 웹앱/idea-box/tools/inbox.js';
   const okAns = deployOk(x);
   const deploy = okAns
-    ? `배포 허락: 효니가 답에서 배포를 허락했다(«${firstLine(okAns).slice(0, 80)}»). 이 쪽지의 레포만, 레포 CLAUDE.md 순서대로 작업 브랜치 push → PR → 병합 → 배포 주소에서 새 판이 뜨는지 확인까지 한다(이 세션은 push·PR·병합 명령이 미리 허락돼 있다). main 직접 push·강제 푸시·지우기·Apps Script 새 버전 배포는 여전히 하지 않는다 — Apps Script는 효니에게 «새 버전» 배포를 부탁하는 줄을 답장에 쓴다. 답장에 배포 주소와 확인한 것을 적는다.`
+    ? `배포 허락: 효니가 답에서 배포를 허락했다(«${firstLine(okAns).slice(0, 80)}»). 이 쪽지의 레포만, 레포 CLAUDE.md 순서대로 작업 브랜치 push → PR → 병합 → 배포 주소에서 새 판이 뜨는지 확인까지 한다(이 세션은 push·PR·병합 명령이 미리 허락돼 있다). Apps Script 새 버전 배포도 레포 CLAUDE.md에 배포 도구가 있으면(책장 중계는 \`tools/relay-deploy.py push <gs> → deploy "설명"\`, 점검 실패 시 저절로 되돌림. python이 스토어 바로가기라 안 돌면 googleapiclient가 든 venv python — 학교 PC는 ~/neis-automation-kit/.venv/Scripts/python.exe) 직접 하고 «배포 완료: 버전 N → M»을 답장에 적는다 — 효니에게 떠넘기지 않는다. 배포 도구가 없는 Apps Script만 효니에게 «새 버전» 배포를 부탁한다. main 직접 push·강제 푸시·지우기는 여전히 하지 않는다. 답장에 배포 주소와 확인한 것을 적는다.`
     : deployPickedButNoted(x)
     ? `배포 다시 묻기: 효니가 «배포해»를 골랐지만 덧붙인 말(«${firstLine(deployPickedButNoted(x)).slice(0, 100)}») 때문에 이 세션은 push·PR·병합 명령이 막혀 있다(덧말에 범위·조건이 있을 수 있어서). 덧말이 시킨 다른 일(규칙 적기 등)은 커밋까지 하고, «보통 세션에서 배포해 달라고 하세요»로 끝내지 말고 덧말을 반영해 배포할 레포를 이름으로 모두 적어 한 번 더 묻는다: \`${inbox} ask ${id} "덧붙인 말대로 ○○·○○만 배포할게요(나머지는 커밋만). 이대로 배포할까요? [가: 배포해 / 나: 조금 더 볼게]"\` — 효니가 덧말 없이 «가: 배포해»로 답하면 다음 세션이 그 레포들만 배포까지 한다.`
     : `배포 묻기: 효니 답에 배포 허락이 없다. 이 세션은 push·PR·병합 명령이 막혀 있다. 커밋까지 하고, 배포가 필요하면 \`${inbox} ask ${id} "… 배포할까요? [가: 배포해 / 나: 조금 더 볼게]"\` 로 묻는다 — 효니가 «배포해»로 답하면 다음 세션이 배포까지 한다. «보통 세션에서 배포해 달라고 하세요»로만 끝내지 않는다.`;
-  const noGo = okAns ? NO_GO.replace('배포(push·PR 병합·Pages·Apps Script 배포)', 'Apps Script 배포') : NO_GO;
+  const noGo = okAns ? NO_GO.replace('배포(push·PR 병합·Pages·Apps Script 배포)', '배포 도구 없는 Apps Script 배포') : NO_GO;
   const stop = `되돌리기 어려운 일 — ${noGo} — 과 효니만 정할 수 있는 일은 하지 않는다. 미리보기·초안까지 만든 뒤 \`${inbox} ask ${id} "질문"\` 으로 묻고 끝낸다. 질문은 쉬운 말로, 물을 것이 여럿이면 «① …» «② …» 줄마다 하나씩, 고를 것은 줄 끝에 «[가 / 나 / 다]» — 앱이 질문마다 답 칸과 번호 단추를 보인다. ${deploy}`;
   const tail = [
     `다 하면 \`${inbox} reply ${id} "결과(쉬운 말, 만든 파일·주소 포함)"\` — «끝남»은 효니가 답장을 보고 앱에서 정하니 done은 쓰지 않는다. 묻는 답이면 답 자체를 답장에 적는다(«파일 보세요»로 끝내지 않기). 다 못 했으면 \`${inbox} reply ${id} "한 것 · 남은 것"\`. 답장은 효니가 폰에서 읽는다. reply가 «시간표 할 일 완료 후보»를 보여 주면, 이번에 다 끝낸 일과 같은 할 일만 (쪽지 done과 다른 명령인) \`node 클로드작업/도구/시간표할일.js done <할 일 id> --why "쪽지 ${id}"\` 로 완료하고 답장 끝에 «시간표 할 일 완료: 제목» 한 줄을 더 단다(남은 일이 있는 할 일·애매한 것은 그대로 둔다. 2026-11-23, 출처: 효니 말 «앞으로도 연계되면 좋겠는데»).`,
