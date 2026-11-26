@@ -555,6 +555,8 @@ async function step() {
     await startOne(id, x);
   }
 }
+// 이 세션이 시작한 뒤(at) 클로드 말(답장·질문)이 쪽지에 달렸나 — 대화 th의 클로드 말 또는 re 사본의 때 rat
+const saidSince = (x, at) => !!x && ((x.rat || 0) >= at || Object.values(x.th || {}).some((m) => m && m.w === 'c' && (m.at || 0) >= at));
 async function startOne(id, x) {
   // 가져가기: 내 표를 쓰고 몇 초 뒤 다시 읽어 확인(다른 PC와 겹치지 않게)
   const n = crypto.randomBytes(4).toString('hex');
@@ -606,15 +608,19 @@ async function startOne(id, x) {
       const after = readOne(id);
       if (!after) how = 'gone';
       else if (after.st === 'done') how = 'done';
-      else if (after.run?.n === n) how = /ENOENT/.test(err) ? 'nostart' : code === 0 && result ? 'noreply' : 'stop';
+      else if (after.run?.n === n) how = /ENOENT/.test(err) ? 'nostart' : saidSince(after, logHead.at) ? 'reply' : code === 0 && result ? 'noreply' : 'stop';
       else if (after.ask) how = 'ask';
       if (after && after.st === 'done') patch(id, { run: null, go: null, sid, spc: PC }); // 효니가 그새 «끝남»으로 닫음 → 상태는 그대로
-      else if (after && after.run?.n === n) {
+      else if (after && after.run?.n === n && saidSince(after, logHead.at)) {
+        // 세션이 답장은 남겼는데 inbox.js가 끝나기 전에 끊겨 run만 남음(2026-11-27, 쪽지 imwx6ye9kn0m1: 답장 명령이 2분 제한에 끊겨 실행기가 마지막 말을 600자로 잘라 한 번 더 붙였다,
+        // 효니 «답을 왜 끝까지 안 하니») → 답장을 다시 붙이지 않고 내려놓기만
+        patch(id, { run: null, go: null, st: 'seen', rep: Date.now(), sid, spc: PC });
+      } else if (after && after.run?.n === n) {
         // 세션이 inbox.js로 답장을 남기지 않음 → 마지막 말을 답장으로 남기고 내려놓기
         // 세션을 열지도 못한 경우(claude 없음)는 그대로 말한다 — «PC가 꺼졌다»로 잘못 알리지 않게. 세션이 없으니 sid·spc도 남기지 않는다(다음에 없는 세션을 --resume하지 않게)
         const noStart = /ENOENT/.test(err);
         if (noStart) canRun = { ok: false, why: 'claude 명령을 찾지 못해요', at: Date.now() };
-        const re = code === 0 && result ? `(답장을 못 남겨서 대신 적어요) ${result.slice(0, 600)}`
+        const re = code === 0 && result ? `(답장을 못 남겨서 대신 적어요) ${result.length > 4000 ? result.slice(0, 4000) + ' …(길어서 뒤를 줄였어요)' : result}`
           : noStart ? `${PC} PC에서 클로드를 열지 못해 시작하지 못했어요. 다시 체크해서 다른 PC를 골라 주세요.`
             : `하다가 멈췄어요(코드 ${code}). 다시 체크하면 이어서 할게요.`;
         patch(id, { run: null, go: null, st: 'seen', re, rat: Date.now(), rep: Date.now(), ...(noStart ? {} : { sid, spc: PC }) });
